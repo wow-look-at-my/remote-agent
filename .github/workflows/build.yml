@@ -8,16 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      GONOSUMDB: "*"
-      GONOSUMCHECK: "*"
     steps:
       - uses: actions/checkout@v4
 
       - uses: wow-look-at-my/go-toolchain@v1
         with:
           verbose: true
-        env:
-          GOSUMDB: "sum.golang.org"
-          GONOSUMDB: "*"
-          GONOSUMCHECK: "*"
