@@ -9,11 +9,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      GOSUMDB: "sum.golang.org"
       GONOSUMCHECK: "golang.org/toolchain"
-      GOFLAGS: ""
     steps:
       - uses: actions/checkout@v4
 
       - uses: wow-look-at-my/go-toolchain@v1
         with:
           verbose: true
+        env:
+          GOSUMDB: "sum.golang.org"
