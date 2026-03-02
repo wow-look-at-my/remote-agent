@@ -1,0 +1,16 @@
+name: Build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: wow-look-at-my/go-toolchain@main
+        with:
+          verbose: true

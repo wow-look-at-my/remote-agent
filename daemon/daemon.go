@@ -22,11 +22,25 @@ import (
 // Daemon holds a persistent SSH connection and serves requests over a Unix socket.
 type Daemon struct {
 	conn       *sshutil.ConnResult
+	runner     Runner // abstraction over SSH command execution
 	remotePath string // path to remote helper binary
 	sockPath   string
 	pidPath    string
 	listener   net.Listener
 	mu         sync.Mutex // serialize SSH session access
+}
+
+// sshRunner implements Runner using a real SSH client.
+type sshRunner struct {
+	client *ssh.Client
+}
+
+func (r *sshRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	return sshutil.RunCommand(r.client, command)
+}
+
+func (r *sshRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return sshutil.RunCommandWithStdin(r.client, command, stdin)
 }
 
 // SocketPath returns the Unix socket path for a given host.
@@ -68,13 +82,16 @@ func Start(target string, port int) error {
 
 	fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
 
+	runner := &sshRunner{client: conn.Client}
+
 	// Run startup audit
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s",
 		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint))
-	sshutil.RunCommand(conn.Client, auditCmd)
+	runner.Run(auditCmd)
 
 	d := &Daemon{
 		conn:       conn,
+		runner:     runner,
 		remotePath: remotePath,
 		sockPath:   SocketPath(target),
 		pidPath:    PIDPath(target),
@@ -135,12 +152,14 @@ func (d *Daemon) handleClient(conn net.Conn) {
 }
 
 func (d *Daemon) shutdown() {
-	// Send shutdown audit to remote
-	auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
-	sshutil.RunCommand(d.conn.Client, auditCmd)
+	if d.runner != nil {
+		// Send shutdown audit to remote
+		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
+		d.runner.Run(auditCmd)
 
-	// Delete remote binary
-	sshutil.RunCommand(d.conn.Client, fmt.Sprintf("rm -f %s", d.remotePath))
+		// Delete remote binary
+		d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
+	}
 
 	d.cleanup()
 }

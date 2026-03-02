@@ -8,14 +8,19 @@ import (
 	"strings"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
-	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
+
+// Runner abstracts SSH command execution for testability.
+type Runner interface {
+	Run(command string) (stdout, stderr []byte, exitCode int, err error)
+	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+}
 
 func (h *Handler) handlePing() *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
-	stdout, _, _, err := sshutil.RunCommand(h.daemon.conn.Client, "echo pong")
+	stdout, _, _, err := h.daemon.runner.Run("echo pong")
 	if err != nil {
 		return errResponse(fmt.Errorf("ping failed: %w", err))
 	}
@@ -34,9 +39,9 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	// Audit log the command
 	auditCmd := fmt.Sprintf("%s serve audit --action exec --detail %s",
 		h.daemon.remotePath, shellEscape(command))
-	sshutil.RunCommand(h.daemon.conn.Client, auditCmd)
+	h.daemon.runner.Run(auditCmd)
 
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, command)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(command)
 	if err != nil {
 		return errResponse(fmt.Errorf("exec failed: %w", err))
 	}
@@ -58,7 +63,7 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 
 	// Use cat to read the file, base64 encode to avoid binary issues
 	cmd := fmt.Sprintf("base64 %s", shellEscape(path))
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("read failed: %w", err))
 	}
@@ -95,13 +100,13 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	// Audit
 	auditCmd := fmt.Sprintf("%s serve audit --action write --detail %s",
 		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", path, len(content))))
-	sshutil.RunCommand(h.daemon.conn.Client, auditCmd)
+	h.daemon.runner.Run(auditCmd)
 
 	// Write via cat, using base64 to avoid binary issues
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	cmd := fmt.Sprintf("echo %s | base64 -d > %s && chmod %s %s",
 		shellEscape(encoded), shellEscape(path), mode, shellEscape(path))
-	_, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	_, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("write failed: %w", err))
 	}
@@ -131,11 +136,11 @@ func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {
 	// Audit
 	auditCmd := fmt.Sprintf("%s serve audit --action upload --detail %s",
 		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", remotePath, len(data))))
-	sshutil.RunCommand(h.daemon.conn.Client, auditCmd)
+	h.daemon.runner.Run(auditCmd)
 
 	// Write via stdin pipe (handles binary data correctly)
 	cmd := fmt.Sprintf("cat > %s", shellEscape(remotePath))
-	_, stderr, exitCode, err := sshutil.RunCommandWithStdin(h.daemon.conn.Client, cmd, data)
+	_, stderr, exitCode, err := h.daemon.runner.RunStdin(cmd, data)
 	if err != nil {
 		return errResponse(fmt.Errorf("upload failed: %w", err))
 	}
@@ -158,7 +163,7 @@ func (h *Handler) handleDownload(params map[string]any) *protocol.DaemonResponse
 
 	// Read remote file via cat
 	cmd := fmt.Sprintf("cat %s", shellEscape(remotePath))
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("download failed: %w", err))
 	}
@@ -188,7 +193,7 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
 		h.daemon.remotePath, shellEscape(path), shellEscape(oldText), shellEscape(newText))
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("edit failed: %w", err))
 	}
@@ -196,15 +201,17 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("edit %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
+	// First check if it's an error response
+	var raw map[string]any
+	if err := json.Unmarshal(stdout, &raw); err != nil {
+		return errResponse(fmt.Errorf("parse edit result: %w", err))
+	}
+	if e, ok := raw["error"]; ok {
+		return errResponse(fmt.Errorf("%v", e))
+	}
+
 	var result protocol.EditResult
 	if err := json.Unmarshal(stdout, &result); err != nil {
-		// Check if it's an error response
-		var errResp map[string]string
-		if json.Unmarshal(stdout, &errResp) == nil {
-			if e, ok := errResp["error"]; ok {
-				return errResponse(fmt.Errorf("%s", e))
-			}
-		}
 		return errResponse(fmt.Errorf("parse edit result: %w", err))
 	}
 	return okResponse(result)
@@ -228,13 +235,18 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		cmd = fmt.Sprintf("stat --format='%%F\\t%%s\\t%%a\\t%%Y\\t%%n' %s/* %s/.* 2>/dev/null || true", shellEscape(path), shellEscape(path))
 	}
 
-	stdout, _, _, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, _, _, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("ls failed: %w", err))
 	}
 
+	entries := parseLsOutput(string(stdout))
+	return okResponse(protocol.DirListing{Path: path, Entries: entries})
+}
+
+func parseLsOutput(output string) []protocol.DirEntry {
 	var entries []protocol.DirEntry
-	for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line == "" {
 			continue
 		}
@@ -267,8 +279,7 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 			ModTime: modTime,
 		})
 	}
-
-	return okResponse(protocol.DirListing{Path: path, Entries: entries})
+	return entries
 }
 
 func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
@@ -282,7 +293,7 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 	if filter != "" {
 		cmd += " --filter " + shellEscape(filter)
 	}
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("ps failed: %w", err))
 	}
@@ -303,7 +314,7 @@ func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 
 	// Use remote helper
 	cmd := h.daemon.remotePath + " serve sysinfo"
-	stdout, stderr, exitCode, err := sshutil.RunCommand(h.daemon.conn.Client, cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("sysinfo failed: %w", err))
 	}
@@ -318,10 +329,13 @@ func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 	return okResponse(result)
 }
 
+// exitFunc can be overridden in tests to prevent os.Exit during testing.
+var exitFunc = os.Exit
+
 func (h *Handler) handleDisconnect() *protocol.DaemonResponse {
 	go func() {
 		h.daemon.shutdown()
-		os.Exit(0)
+		exitFunc(0)
 	}()
 	return okResponse(map[string]string{"status": "disconnecting"})
 }

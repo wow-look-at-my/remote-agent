@@ -194,8 +194,11 @@ func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	return callback, nil
 }
 
+// keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.
+var keepAliveInterval = 30 * time.Second
+
 func keepAlive(client *ssh.Client) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(keepAliveInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		_, _, err := client.SendRequest("keepalive@remote-agent", true, nil)

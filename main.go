@@ -9,48 +9,51 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
-	}
-
-	var err error
-	switch os.Args[1] {
-	case "connect":
-		err = client.RunConnect(os.Args[2:])
-	case "disconnect":
-		err = client.RunDisconnect(os.Args[2:])
-	case "exec":
-		err = client.RunExec(os.Args[2:])
-	case "upload":
-		err = client.RunUpload(os.Args[2:])
-	case "download":
-		err = client.RunDownload(os.Args[2:])
-	case "read":
-		err = client.RunRead(os.Args[2:])
-	case "write":
-		err = client.RunWrite(os.Args[2:])
-	case "edit":
-		err = client.RunEdit(os.Args[2:])
-	case "ls":
-		err = client.RunLs(os.Args[2:])
-	case "ps":
-		err = client.RunPs(os.Args[2:])
-	case "sysinfo":
-		err = client.RunSysinfo(os.Args[2:])
-	case "ping":
-		err = client.RunPing(os.Args[2:])
-	case "serve":
-		err = agent.RunServe(os.Args[2:])
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		printUsage()
-		os.Exit(1)
-	}
-
-	if err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	if len(args) < 1 {
+		printUsage()
+		return fmt.Errorf("no command specified")
+	}
+
+	cmd := args[0]
+	rest := args[1:]
+
+	switch cmd {
+	case "connect":
+		return client.RunConnect(rest)
+	case "disconnect":
+		return client.RunDisconnect(rest)
+	case "exec":
+		return client.RunExec(rest)
+	case "upload":
+		return client.RunUpload(rest)
+	case "download":
+		return client.RunDownload(rest)
+	case "read":
+		return client.RunRead(rest)
+	case "write":
+		return client.RunWrite(rest)
+	case "edit":
+		return client.RunEdit(rest)
+	case "ls":
+		return client.RunLs(rest)
+	case "ps":
+		return client.RunPs(rest)
+	case "sysinfo":
+		return client.RunSysinfo(rest)
+	case "ping":
+		return client.RunPing(rest)
+	case "serve":
+		return agent.RunServe(rest)
+	default:
+		printUsage()
+		return fmt.Errorf("unknown command: %s", cmd)
 	}
 }
 
