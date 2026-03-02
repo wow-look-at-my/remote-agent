@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GONOSUMCHECK: "golang.org/toolchain"
+      GOFLAGS: ""
     steps:
       - uses: actions/checkout@v4
 
