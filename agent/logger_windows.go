@@ -1,27 +1,18 @@
-//go:build !windows
-
 package agent
 
 import (
 	"fmt"
-	"log/syslog"
 	"os"
 )
 
-// Logger wraps syslog for transparent audit logging.
+// Logger wraps logging for audit purposes. On Windows, falls back to stderr.
 type Logger struct {
-	writer *syslog.Writer
-	// Fallback to stderr if syslog unavailable
 	fallback bool
 }
 
-// NewLogger creates a syslog logger. Falls back to stderr if syslog is unavailable.
+// NewLogger creates a stderr-based logger on Windows.
 func NewLogger() *Logger {
-	w, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "remote-agent")
-	if err != nil {
-		return &Logger{fallback: true}
-	}
-	return &Logger{writer: w}
+	return &Logger{fallback: true}
 }
 
 // LogStartup logs the initial connection audit entry.
@@ -49,33 +40,17 @@ func (l *Logger) LogError(action string, err error) {
 	l.err(msg)
 }
 
-// Close closes the syslog connection.
-func (l *Logger) Close() {
-	if l.writer != nil {
-		l.writer.Close()
-	}
-}
+// Close is a no-op on Windows.
+func (l *Logger) Close() {}
 
 func (l *Logger) info(msg string) {
-	if l.fallback {
-		fmt.Fprintf(os.Stderr, "[remote-agent] INFO: %s\n", msg)
-		return
-	}
-	l.writer.Info(msg)
+	fmt.Fprintf(os.Stderr, "[remote-agent] INFO: %s\n", msg)
 }
 
 func (l *Logger) notice(msg string) {
-	if l.fallback {
-		fmt.Fprintf(os.Stderr, "[remote-agent] NOTICE: %s\n", msg)
-		return
-	}
-	l.writer.Notice(msg)
+	fmt.Fprintf(os.Stderr, "[remote-agent] NOTICE: %s\n", msg)
 }
 
 func (l *Logger) err(msg string) {
-	if l.fallback {
-		fmt.Fprintf(os.Stderr, "[remote-agent] ERR: %s\n", msg)
-		return
-	}
-	l.writer.Err(msg)
+	fmt.Fprintf(os.Stderr, "[remote-agent] ERR: %s\n", msg)
 }
