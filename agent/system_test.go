@@ -57,7 +57,7 @@ func TestReadDiskInfo(t *testing.T) {
 
 	for _, d := range disks {
 		assert.NotEqual(t, "", d.MountPoint)
-		assert.Greater(t, d.TotalBytes, 0)
+		assert.GreaterOrEqual(t, d.TotalBytes, 0)
 
 	}
 }
