@@ -12,30 +12,6 @@ import (
 	"github.com/wow-look-at-my/testify/require"
 )
 
-func TestRunServeNoArgs(t *testing.T) {
-	err := RunServe(nil)
-	assert.NotNil(t, err)
-
-}
-
-func TestRunServeUnknownAction(t *testing.T) {
-	err := RunServe([]string{"unknown_action"})
-	assert.NotNil(t, err)
-
-}
-
-func TestRunServeEditMissingFlags(t *testing.T) {
-	err := RunServe([]string{"edit"})
-	assert.NotNil(t, err)
-
-}
-
-func TestRunServeAuditMissingAction(t *testing.T) {
-	err := RunServe([]string{"audit"})
-	assert.NotNil(t, err)
-
-}
-
 // captureStdout redirects stdout to a temp file and returns the captured output.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
@@ -53,36 +29,33 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func TestServeSysinfo(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"sysinfo"})
+		ServeSysinfo()
 	})
 
 	var info protocol.SystemInfo
 	require.NoError(t, json.Unmarshal([]byte(output), &info))
 	assert.NotEqual(t, "", info.Hostname)
 	assert.Greater(t, info.CPU.Threads, 0)
-
 }
 
 func TestServePs(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"ps"})
+		ServePs("")
 	})
 
 	var list protocol.ProcessList
 	require.NoError(t, json.Unmarshal([]byte(output), &list))
 	assert.NotEqual(t, 0, len(list.Processes))
-
 }
 
 func TestServePsWithFilter(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"ps", "--filter", "__nonexistent__"})
+		ServePs("__nonexistent__")
 	})
 
 	var list protocol.ProcessList
 	require.NoError(t, json.Unmarshal([]byte(output), &list))
 	assert.Equal(t, 0, len(list.Processes))
-
 }
 
 func TestServeEdit(t *testing.T) {
@@ -91,7 +64,7 @@ func TestServeEdit(t *testing.T) {
 	os.WriteFile(path, []byte("hello world"), 0644)
 
 	output := captureStdout(t, func() {
-		RunServe([]string{"edit", "--path", path, "--old", "hello", "--new", "goodbye"})
+		ServeEdit(path, "hello", "goodbye")
 	})
 
 	var result protocol.EditResult
@@ -100,7 +73,6 @@ func TestServeEdit(t *testing.T) {
 
 	data, _ := os.ReadFile(path)
 	assert.Equal(t, "goodbye world", string(data))
-
 }
 
 func TestServeEditNotFound(t *testing.T) {
@@ -109,7 +81,7 @@ func TestServeEditNotFound(t *testing.T) {
 	os.WriteFile(path, []byte("hello"), 0644)
 
 	output := captureStdout(t, func() {
-		RunServe([]string{"edit", "--path", path, "--old", "missing", "--new", "x"})
+		ServeEdit(path, "missing", "x")
 	})
 
 	var result map[string]string
@@ -117,40 +89,36 @@ func TestServeEditNotFound(t *testing.T) {
 
 	_, ok := result["error"]
 	assert.True(t, ok)
-
 }
 
 func TestServeAuditStartup(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"audit", "--action", "startup", "--user", "test", "--client-ip", "1.2.3.4", "--fingerprint", "SHA256:abc"})
+		ServeAudit("startup", "", "test", "1.2.3.4", "SHA256:abc")
 	})
 
 	var result map[string]string
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	assert.Equal(t, "logged", result["status"])
-
 }
 
 func TestServeAuditShutdown(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"audit", "--action", "shutdown"})
+		ServeAudit("shutdown", "", "", "", "")
 	})
 
 	var result map[string]string
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	assert.Equal(t, "logged", result["status"])
-
 }
 
 func TestServeAuditGeneric(t *testing.T) {
 	output := captureStdout(t, func() {
-		RunServe([]string{"audit", "--action", "exec", "--detail", "ls -la"})
+		ServeAudit("exec", "ls -la", "", "", "")
 	})
 
 	var result map[string]string
 	json.Unmarshal([]byte(output), &result)
 	assert.Equal(t, "logged", result["status"])
-
 }
 
 func TestWriteJSON(t *testing.T) {
@@ -160,7 +128,6 @@ func TestWriteJSON(t *testing.T) {
 	var result map[string]int
 	require.NoError(t, json.Unmarshal([]byte(output), &result))
 	assert.Equal(t, 1, result["a"])
-
 }
 
 func TestWriteJSONError(t *testing.T) {
@@ -170,5 +137,4 @@ func TestWriteJSONError(t *testing.T) {
 	var result map[string]string
 	json.Unmarshal([]byte(output), &result)
 	assert.Equal(t, "test error", result["error"])
-
 }

@@ -2,13 +2,10 @@ package client
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/wow-look-at-my/remote-agent/daemon"
 	"github.com/wow-look-at-my/remote-agent/protocol"
@@ -67,22 +64,13 @@ func printResponse(resp *protocol.DaemonResponse) error {
 	return enc.Encode(resp.Data)
 }
 
-// RunConnect starts the daemon.
-func RunConnect(args []string) error {
-	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	port := fs.Int("port", 22, "SSH port")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: remote-agent connect <user@host> [--port 22]")
-	}
-	target := fs.Arg(0)
-	return daemon.Start(target, *port)
+// Connect starts the daemon with the given target and SSH port.
+func Connect(target string, port int) error {
+	return daemon.Start(target, port)
 }
 
-// RunDisconnect stops the daemon.
-func RunDisconnect(args []string) error {
+// Disconnect stops the daemon.
+func Disconnect() error {
 	resp, err := sendRequest(&protocol.DaemonRequest{Action: "disconnect"})
 	if err != nil {
 		return err
@@ -90,12 +78,8 @@ func RunDisconnect(args []string) error {
 	return printResponse(resp)
 }
 
-// RunExec runs a command on the remote.
-func RunExec(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: remote-agent exec <command>")
-	}
-	command := strings.Join(args, " ")
+// Exec runs a command on the remote.
+func Exec(command string) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "exec",
 		Params: map[string]any{"command": command},
@@ -106,14 +90,11 @@ func RunExec(args []string) error {
 	return printResponse(resp)
 }
 
-// RunUpload copies a local file to the remote.
-func RunUpload(args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: remote-agent upload <local-path> <remote-path>")
-	}
+// Upload copies a local file to the remote.
+func Upload(localPath, remotePath string) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "upload",
-		Params: map[string]any{"local_path": args[0], "remote_path": args[1]},
+		Params: map[string]any{"local_path": localPath, "remote_path": remotePath},
 	})
 	if err != nil {
 		return err
@@ -121,14 +102,11 @@ func RunUpload(args []string) error {
 	return printResponse(resp)
 }
 
-// RunDownload copies a remote file to local.
-func RunDownload(args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: remote-agent download <remote-path> <local-path>")
-	}
+// Download copies a remote file to local.
+func Download(remotePath, localPath string) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "download",
-		Params: map[string]any{"remote_path": args[0], "local_path": args[1]},
+		Params: map[string]any{"remote_path": remotePath, "local_path": localPath},
 	})
 	if err != nil {
 		return err
@@ -136,14 +114,11 @@ func RunDownload(args []string) error {
 	return printResponse(resp)
 }
 
-// RunRead reads a remote file.
-func RunRead(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: remote-agent read <remote-path>")
-	}
+// Read reads a remote file.
+func Read(path string) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "read",
-		Params: map[string]any{"path": args[0]},
+		Params: map[string]any{"path": path},
 	})
 	if err != nil {
 		return err
@@ -151,30 +126,14 @@ func RunRead(args []string) error {
 	return printResponse(resp)
 }
 
-// RunWrite writes stdin to a remote file.
-func RunWrite(args []string) error {
-	fs := flag.NewFlagSet("write", flag.ContinueOnError)
-	mode := fs.String("mode", "0644", "file mode")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: remote-agent write <remote-path> [--mode 0644]")
-	}
-	remotePath := fs.Arg(0)
-
-	// Read from stdin
-	data, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return fmt.Errorf("read stdin: %w", err)
-	}
-
+// Write writes content to a remote file with the given mode.
+func Write(path, mode string, content []byte) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "write",
 		Params: map[string]any{
-			"path":    remotePath,
-			"content": string(data),
-			"mode":    *mode,
+			"path":    path,
+			"content": string(content),
+			"mode":    mode,
 		},
 	})
 	if err != nil {
@@ -183,24 +142,14 @@ func RunWrite(args []string) error {
 	return printResponse(resp)
 }
 
-// RunEdit edits a remote file with find/replace.
-func RunEdit(args []string) error {
-	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
-	oldText := fs.String("old", "", "text to find")
-	newText := fs.String("new", "", "replacement text")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() < 1 || *oldText == "" {
-		return fmt.Errorf("usage: remote-agent edit <remote-path> --old <text> --new <text>")
-	}
-
+// Edit performs a find/replace in a remote file.
+func Edit(path, oldText, newText string) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "edit",
 		Params: map[string]any{
-			"path": fs.Arg(0),
-			"old":  *oldText,
-			"new":  *newText,
+			"path": path,
+			"old":  oldText,
+			"new":  newText,
 		},
 	})
 	if err != nil {
@@ -209,21 +158,11 @@ func RunEdit(args []string) error {
 	return printResponse(resp)
 }
 
-// RunLs lists a remote directory.
-func RunLs(args []string) error {
-	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	recursive := fs.Bool("recursive", false, "recursive listing")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	path := "."
-	if fs.NArg() > 0 {
-		path = fs.Arg(0)
-	}
-
+// Ls lists a remote directory.
+func Ls(path string, recursive bool) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "ls",
-		Params: map[string]any{"path": path, "recursive": *recursive},
+		Params: map[string]any{"path": path, "recursive": recursive},
 	})
 	if err != nil {
 		return err
@@ -231,17 +170,11 @@ func RunLs(args []string) error {
 	return printResponse(resp)
 }
 
-// RunPs lists remote processes.
-func RunPs(args []string) error {
-	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
-	filter := fs.String("filter", "", "filter by process name")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
+// Ps lists remote processes, optionally filtered by name.
+func Ps(filter string) error {
 	params := map[string]any{}
-	if *filter != "" {
-		params["filter"] = *filter
+	if filter != "" {
+		params["filter"] = filter
 	}
 
 	resp, err := sendRequest(&protocol.DaemonRequest{
@@ -254,8 +187,8 @@ func RunPs(args []string) error {
 	return printResponse(resp)
 }
 
-// RunSysinfo gets remote system info.
-func RunSysinfo(args []string) error {
+// Sysinfo gets remote system info.
+func Sysinfo() error {
 	resp, err := sendRequest(&protocol.DaemonRequest{Action: "sysinfo"})
 	if err != nil {
 		return err
@@ -263,8 +196,8 @@ func RunSysinfo(args []string) error {
 	return printResponse(resp)
 }
 
-// RunPing checks if the daemon and remote are healthy.
-func RunPing(args []string) error {
+// Ping checks if the daemon and remote are healthy.
+func Ping() error {
 	resp, err := sendRequest(&protocol.DaemonRequest{Action: "ping"})
 	if err != nil {
 		return err
