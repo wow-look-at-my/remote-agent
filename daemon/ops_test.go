@@ -83,7 +83,6 @@ func TestHandlePing(t *testing.T) {
 
 	resp := h.handlePing()
 	assert.True(t, resp.OK)
-
 }
 
 func TestHandlePingFail(t *testing.T) {
@@ -92,7 +91,6 @@ func TestHandlePingFail(t *testing.T) {
 
 	resp := h.handlePing()
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleExec(t *testing.T) {
@@ -101,14 +99,12 @@ func TestHandleExec(t *testing.T) {
 
 	resp := h.handleExec(map[string]any{"command": "ls -la"})
 	assert.True(t, resp.OK)
-
 }
 
 func TestHandleExecMissingCommand(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleExec(map[string]any{})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleExecError(t *testing.T) {
@@ -117,7 +113,6 @@ func TestHandleExecError(t *testing.T) {
 
 	resp := h.handleExec(map[string]any{"command": "whoami"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleExecWithNonZeroExit(t *testing.T) {
@@ -126,7 +121,6 @@ func TestHandleExecWithNonZeroExit(t *testing.T) {
 
 	resp := h.handleExec(map[string]any{"command": "false"})
 	assert.True(t, resp.OK)
-
 }
 
 func TestHandleRead(t *testing.T) {
@@ -137,14 +131,12 @@ func TestHandleRead(t *testing.T) {
 
 	resp := h.handleRead(map[string]any{"path": "/etc/hostname"})
 	assert.True(t, resp.OK)
-
 }
 
 func TestHandleReadMissingPath(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleRead(map[string]any{})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleReadNotFound(t *testing.T) {
@@ -153,7 +145,6 @@ func TestHandleReadNotFound(t *testing.T) {
 
 	resp := h.handleRead(map[string]any{"path": "/nonexistent"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleReadFail(t *testing.T) {
@@ -162,7 +153,6 @@ func TestHandleReadFail(t *testing.T) {
 
 	resp := h.handleRead(map[string]any{"path": "/test"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleWrite(t *testing.T) {
@@ -171,16 +161,13 @@ func TestHandleWrite(t *testing.T) {
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello"})
 	assert.True(t, resp.OK)
-	assert.GreaterOrEqual(t,	// Verify audit was called
-		len(mock.calls), 2)
-
+	assert.GreaterOrEqual(t, len(mock.calls), 2) // Verify audit was called
 }
 
 func TestHandleWriteMissingPath(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleWrite(map[string]any{})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleWriteError(t *testing.T) {
@@ -189,7 +176,6 @@ func TestHandleWriteError(t *testing.T) {
 
 	resp := h.handleWrite(map[string]any{"path": "/root/test.txt", "content": "x"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleUpload(t *testing.T) {
@@ -202,21 +188,18 @@ func TestHandleUpload(t *testing.T) {
 
 	resp := h.handleUpload(map[string]any{"local_path": localFile, "remote_path": "/tmp/remote.txt"})
 	assert.True(t, resp.OK)
-
 }
 
 func TestHandleUploadMissingParams(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleUpload(map[string]any{})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleUploadLocalNotFound(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleUpload(map[string]any{"local_path": "/nonexistent", "remote_path": "/tmp/x"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleUploadSSHError(t *testing.T) {
@@ -229,7 +212,6 @@ func TestHandleUploadSSHError(t *testing.T) {
 
 	resp := h.handleUpload(map[string]any{"local_path": f, "remote_path": "/tmp/x"})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleDownload(t *testing.T) {
@@ -245,14 +227,12 @@ func TestHandleDownload(t *testing.T) {
 
 	data, _ := os.ReadFile(localPath)
 	assert.Equal(t, "file content", string(data))
-
 }
 
 func TestHandleDownloadMissingParams(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleDownload(map[string]any{})
 	assert.False(t, resp.OK)
-
 }
 
 func TestHandleDownloadError(t *testing.T) {
@@ -261,5 +241,4 @@ func TestHandleDownloadError(t *testing.T) {
 
 	resp := h.handleDownload(map[string]any{"remote_path": "/tmp/missing", "local_path": "/tmp/out"})
 	assert.False(t, resp.OK)
-
 }
