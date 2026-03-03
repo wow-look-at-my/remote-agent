@@ -60,7 +60,8 @@ func TestHandleLsDefaultPath(t *testing.T) {
 
 func TestHandleLsRecursive(t *testing.T) {
 	h, mock := newTestHandler()
-	mock.defaultResponse = mockResponse{stdout: []byte("d\t4096\t755\t1709300000\t/tmp/dir\n"), exitCode: 0}
+	// find format has 6 fields: type\tsize\tmode\ttime\tlinktarget\tpath
+	mock.defaultResponse = mockResponse{stdout: []byte("d\t4096\t755\t1709300000\t\t/tmp/dir\n"), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
 	assert.True(t, resp.OK)
@@ -112,7 +113,7 @@ func TestHandleSysinfoError(t *testing.T) {
 
 func TestParseLsOutput(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t/tmp/subdir\nregular file\t100\t644\t1709300000\t/tmp/test.txt\n"
-	entries := parseLsOutput(output)
+	entries := parseStatOutput(output)
 	require.Equal(t, 2, len(entries))
 	assert.True(t, entries[0].IsDir)
 	assert.False(t, entries[1].IsDir)
@@ -122,20 +123,20 @@ func TestParseLsOutput(t *testing.T) {
 
 func TestParseLsOutputSkipsDotEntries(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t.\nd\t4096\t755\t1709300000\t..\nd\t4096\t755\t1709300000\t/tmp/real\n"
-	entries := parseLsOutput(output)
+	entries := parseStatOutput(output)
 	assert.Equal(t, 1, len(entries))
 
 }
 
 func TestParseLsOutputEmpty(t *testing.T) {
-	entries := parseLsOutput("")
+	entries := parseStatOutput("")
 	assert.Equal(t, 0, len(entries))
 
 }
 
 func TestParseLsOutputMalformed(t *testing.T) {
 	output := "not enough fields\n"
-	entries := parseLsOutput(output)
+	entries := parseStatOutput(output)
 	assert.Equal(t, 0, len(entries))
 
 }
@@ -340,7 +341,7 @@ func TestHandleExecAudit(t *testing.T) {
 
 func TestParseLsOutputFractionalTime(t *testing.T) {
 	output := "d\t4096\t755\t1709300000.123456\t/tmp/dir\n"
-	entries := parseLsOutput(output)
+	entries := parseStatOutput(output)
 	require.Equal(t, 1, len(entries))
 	assert.Equal(t, int64(1709300000), entries[0].ModTime)
 
@@ -348,7 +349,180 @@ func TestParseLsOutputFractionalTime(t *testing.T) {
 
 func TestParseLsOutputSkipsDotInPath(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t/path/to/.\nd\t4096\t755\t1709300000\t/path/to/..\nf\t100\t644\t1709300000\t/path/to/file\n"
-	entries := parseLsOutput(output)
+	entries := parseStatOutput(output)
 	assert.Equal(t, 1, len(entries))
 
+}
+
+// --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---
+
+func TestParseLsCommand(t *testing.T) {
+	tests := []struct {
+		cmd       string
+		wantPath  string
+		wantRecur bool
+		wantOK    bool
+	}{
+		{"ls", ".", false, true},
+		{"ls /tmp", "/tmp", false, true},
+		{"ls -R /tmp", "/tmp", true, true},
+		{"ls -R", ".", true, true},
+		{"ls -la", "", false, false},        // unsupported flags
+		{"ls -la /tmp", "", false, false},   // unsupported flags
+		{"ls --color /tmp", "", false, false},
+		{"cat /etc/passwd", "", false, false}, // not ls
+		{"", "", false, false},
+		{"lsof", "", false, false},           // not ls
+	}
+	for _, tt := range tests {
+		path, recursive, ok := parseLsCommand(tt.cmd)
+		assert.Equal(t, tt.wantOK, ok, "cmd=%q", tt.cmd)
+		if ok {
+			assert.Equal(t, tt.wantPath, path, "cmd=%q", tt.cmd)
+			assert.Equal(t, tt.wantRecur, recursive, "cmd=%q", tt.cmd)
+		}
+	}
+}
+
+func TestStripTrailingRedirect(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"echo hello 2>&1", "echo hello"},
+		{"echo hello", "echo hello"},
+		{"echo hello  2>&1", "echo hello"},
+		{"echo 2>&1 hello", "echo 2>&1 hello"}, // not trailing
+		{"2>&1", ""},
+		{"cmd", "cmd"},
+	}
+	for _, tt := range tests {
+		got := stripTrailingRedirect(tt.input)
+		assert.Equal(t, tt.want, got, "input=%q", tt.input)
+	}
+}
+
+func TestHandleExecRewritesLs(t *testing.T) {
+	h, mock := newTestHandler()
+	// When exec "ls /tmp" is called, it should redirect to handleLs
+	// The ls handler will call stat command
+	output := "regular file\t100\t644\t1709300000\t/tmp/a.txt\n"
+	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
+
+	resp := h.handleExec(map[string]any{"command": "ls /tmp"})
+	assert.True(t, resp.OK)
+
+	// Verify the response is a DirListing (not ExecResult)
+	listing, ok := resp.Data.(protocol.DirListing)
+	assert.True(t, ok, "expected DirListing, got %T", resp.Data)
+	assert.Equal(t, "/tmp", listing.Path)
+}
+
+func TestHandleExecDoesNotRewriteComplexLs(t *testing.T) {
+	h, mock := newTestHandler()
+	mock.onCommand("ls -la /tmp", []byte("total 0\n"), 0)
+
+	resp := h.handleExec(map[string]any{"command": "ls -la /tmp"})
+	assert.True(t, resp.OK)
+
+	// Verify the response is an ExecResult (not DirListing)
+	result, ok := resp.Data.(protocol.ExecResult)
+	assert.True(t, ok, "expected ExecResult, got %T", resp.Data)
+	assert.Equal(t, "total 0\n", result.Stdout)
+}
+
+func TestHandleExecStrips2Redirect(t *testing.T) {
+	h, mock := newTestHandler()
+	// The command after stripping 2>&1 should be "whoami"
+	mock.onCommand("whoami", []byte("root\n"), 0)
+
+	resp := h.handleExec(map[string]any{"command": "whoami 2>&1"})
+	assert.True(t, resp.OK)
+
+	result, ok := resp.Data.(protocol.ExecResult)
+	assert.True(t, ok)
+	assert.Equal(t, "root\n", result.Stdout)
+}
+
+func TestHandleReadlink(t *testing.T) {
+	h, mock := newTestHandler()
+	mock.onCommand("readlink -f '/usr/bin/python'", []byte("/usr/bin/python3.11\n"), 0)
+
+	resp := h.handleReadlink(map[string]any{"path": "/usr/bin/python"})
+	assert.True(t, resp.OK)
+
+	result, ok := resp.Data.(protocol.ReadlinkResult)
+	assert.True(t, ok)
+	assert.Equal(t, "/usr/bin/python", result.Path)
+	assert.Equal(t, "/usr/bin/python3.11", result.Target)
+}
+
+func TestHandleReadlinkMissingPath(t *testing.T) {
+	h, _ := newTestHandler()
+	resp := h.handleReadlink(map[string]any{})
+	assert.False(t, resp.OK)
+}
+
+func TestHandleReadlinkError(t *testing.T) {
+	h, mock := newTestHandler()
+	mock.onCommandErr("readlink -f '/nonexistent'", []byte("No such file"), 1)
+
+	resp := h.handleReadlink(map[string]any{"path": "/nonexistent"})
+	assert.False(t, resp.OK)
+}
+
+func TestHandleReadlinkSSHError(t *testing.T) {
+	h, mock := newTestHandler()
+	mock.onCommandFail("readlink -f '/test'", fmt.Errorf("ssh error"))
+
+	resp := h.handleReadlink(map[string]any{"path": "/test"})
+	assert.False(t, resp.OK)
+}
+
+func TestParseFindOutput(t *testing.T) {
+	output := "d\t4096\t755\t1709300000\t\t/tmp/subdir\nf\t100\t644\t1709300000\t\t/tmp/test.txt\nl\t12\t777\t1709300000\t/tmp/real\t/tmp/link\n"
+	entries := parseFindOutput(output)
+	require.Equal(t, 3, len(entries))
+
+	assert.True(t, entries[0].IsDir)
+	assert.False(t, entries[0].IsLink)
+
+	assert.False(t, entries[1].IsDir)
+	assert.False(t, entries[1].IsLink)
+	assert.Equal(t, int64(100), entries[1].Size)
+
+	assert.True(t, entries[2].IsLink)
+	assert.Equal(t, "/tmp/real", entries[2].Target)
+	assert.Equal(t, "/tmp/link", entries[2].Name)
+}
+
+func TestParseFindOutputSkipsDots(t *testing.T) {
+	output := "d\t4096\t755\t1709300000\t\t.\nd\t4096\t755\t1709300000\t\t..\nf\t100\t644\t1709300000\t\t/tmp/real\n"
+	entries := parseFindOutput(output)
+	assert.Equal(t, 1, len(entries))
+}
+
+func TestParseFindOutputEmpty(t *testing.T) {
+	entries := parseFindOutput("")
+	assert.Equal(t, 0, len(entries))
+}
+
+func TestParseStatOutputSymlink(t *testing.T) {
+	output := "symbolic link\t12\t777\t1709300000\t/tmp/link\n"
+	entries := parseStatOutput(output)
+	require.Equal(t, 1, len(entries))
+	assert.True(t, entries[0].IsLink)
+	assert.False(t, entries[0].IsDir)
+}
+
+func TestHandleDispatchReadlink(t *testing.T) {
+	mock := newMockRunner()
+	mock.onCommand("readlink -f '/usr/bin/python'", []byte("/usr/bin/python3\n"), 0)
+	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
+
+	resp := h.Handle(&protocol.DaemonRequest{
+		Action: "readlink",
+		Params: map[string]any{"path": "/usr/bin/python"},
+	})
+	assert.True(t, resp.OK)
 }

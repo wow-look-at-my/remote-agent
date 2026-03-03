@@ -33,6 +33,14 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("missing 'command' parameter"))
 	}
 
+	// Rewrite "exec ls [path]" to native ls handler for structured output
+	if lsPath, recursive, ok := parseLsCommand(command); ok {
+		return h.handleLs(map[string]any{"path": lsPath, "recursive": recursive})
+	}
+
+	// Strip pointless trailing 2>&1 — stderr is already captured separately
+	command = stripTrailingRedirect(command)
+
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
@@ -50,6 +58,38 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 		Stderr:   string(stderr),
 		ExitCode: exitCode,
 	})
+}
+
+// parseLsCommand checks if a command is a simple "ls [path]" and returns
+// the path and whether it's recursive. Returns ok=false for complex ls
+// invocations with unsupported flags.
+func parseLsCommand(command string) (path string, recursive bool, ok bool) {
+	parts := strings.Fields(command)
+	if len(parts) == 0 || parts[0] != "ls" {
+		return "", false, false
+	}
+	path = "."
+	for _, p := range parts[1:] {
+		if p == "-R" {
+			recursive = true
+		} else if strings.HasPrefix(p, "-") {
+			// Has flags we don't support natively — let exec handle it
+			return "", false, false
+		} else {
+			path = p
+		}
+	}
+	return path, recursive, true
+}
+
+// stripTrailingRedirect removes a trailing "2>&1" from commands since
+// stderr is already captured separately by the SSH transport.
+func stripTrailingRedirect(command string) string {
+	trimmed := strings.TrimSpace(command)
+	if strings.HasSuffix(trimmed, "2>&1") {
+		return strings.TrimSpace(trimmed[:len(trimmed)-4])
+	}
+	return command
 }
 
 func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
@@ -229,9 +269,10 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 
 	var cmd string
 	if recursive {
-		// Use find for recursive listing
-		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%p\\n' 2>/dev/null", shellEscape(path))
+		// Use find for recursive listing; %y gives type (d/f/l), %l gives symlink target
+		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
 	} else {
+		// Use stat with dereferenced info + readlink for symlink targets
 		cmd = fmt.Sprintf("stat --format='%%F\\t%%s\\t%%a\\t%%Y\\t%%n' %s/* %s/.* 2>/dev/null || true", shellEscape(path), shellEscape(path))
 	}
 
@@ -240,11 +281,60 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("ls failed: %w", err))
 	}
 
-	entries := parseLsOutput(string(stdout))
+	var entries []protocol.DirEntry
+	if recursive {
+		entries = parseFindOutput(string(stdout))
+	} else {
+		entries = parseStatOutput(string(stdout))
+	}
 	return okResponse(protocol.DirListing{Path: path, Entries: entries})
 }
 
-func parseLsOutput(output string) []protocol.DirEntry {
+// parseFindOutput parses output from find with format: type\tsize\tmode\ttime\tlinktarget\tpath
+func parseFindOutput(output string) []protocol.DirEntry {
+	var entries []protocol.DirEntry
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 6)
+		if len(fields) < 6 {
+			continue
+		}
+
+		typeField := fields[0]
+		size := parseInt64(fields[1])
+		mode := fields[2]
+		modTime := parseInt64(strings.Split(fields[3], ".")[0])
+		linkTarget := fields[4]
+		name := fields[5]
+
+		baseName := name
+		if idx := strings.LastIndex(name, "/"); idx >= 0 {
+			baseName = name[idx+1:]
+		}
+		if baseName == "." || baseName == ".." {
+			continue
+		}
+
+		entry := protocol.DirEntry{
+			Name:    name,
+			Size:    size,
+			Mode:    mode,
+			IsDir:   typeField == "d",
+			ModTime: modTime,
+		}
+		if typeField == "l" {
+			entry.IsLink = true
+			entry.Target = linkTarget
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// parseStatOutput parses output from stat with format: type\tsize\tmode\ttime\tpath
+func parseStatOutput(output string) []protocol.DirEntry {
 	var entries []protocol.DirEntry
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line == "" {
@@ -258,10 +348,9 @@ func parseLsOutput(output string) []protocol.DirEntry {
 		typeField := fields[0]
 		size := parseInt64(fields[1])
 		mode := fields[2]
-		modTime := parseInt64(strings.Split(fields[3], ".")[0]) // truncate fractional seconds
+		modTime := parseInt64(strings.Split(fields[3], ".")[0])
 		name := fields[4]
 
-		// Skip . and .. entries
 		baseName := name
 		if idx := strings.LastIndex(name, "/"); idx >= 0 {
 			baseName = name[idx+1:]
@@ -270,16 +359,43 @@ func parseLsOutput(output string) []protocol.DirEntry {
 			continue
 		}
 
-		isDir := typeField == "d" || typeField == "directory"
-		entries = append(entries, protocol.DirEntry{
+		entry := protocol.DirEntry{
 			Name:    name,
 			Size:    size,
 			Mode:    mode,
-			IsDir:   isDir,
+			IsDir:   typeField == "d" || typeField == "directory",
 			ModTime: modTime,
-		})
+		}
+		if typeField == "symbolic link" {
+			entry.IsLink = true
+		}
+		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func (h *Handler) handleReadlink(params map[string]any) *protocol.DaemonResponse {
+	path, _ := params["path"].(string)
+	if path == "" {
+		return errResponse(fmt.Errorf("missing 'path' parameter"))
+	}
+
+	h.daemon.mu.Lock()
+	defer h.daemon.mu.Unlock()
+
+	cmd := fmt.Sprintf("readlink -f %s", shellEscape(path))
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
+	if err != nil {
+		return errResponse(fmt.Errorf("readlink failed: %w", err))
+	}
+	if exitCode != 0 {
+		return errResponse(fmt.Errorf("readlink %s: %s", path, strings.TrimSpace(string(stderr))))
+	}
+
+	return okResponse(protocol.ReadlinkResult{
+		Path:   path,
+		Target: strings.TrimSpace(string(stdout)),
+	})
 }
 
 func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {

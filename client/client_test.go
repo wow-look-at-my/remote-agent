@@ -90,7 +90,7 @@ func TestSendRequestAndReceive(t *testing.T) {
 }
 
 func TestPrintResponse(t *testing.T) {
-	err := printResponse(&protocol.DaemonResponse{Error: "test error"})
+	err := printResponse(&protocol.DaemonResponse{Error: "test error"}, "exec")
 	assert.NotNil(t, err)
 
 	old := os.Stdout
@@ -98,7 +98,7 @@ func TestPrintResponse(t *testing.T) {
 	os.Stdout = f
 	defer func() { os.Stdout = old }()
 
-	err = printResponse(&protocol.DaemonResponse{OK: true, Data: "hello"})
+	err = printResponse(&protocol.DaemonResponse{OK: true, Data: "hello"}, "exec")
 	assert.Nil(t, err)
 }
 
@@ -363,4 +363,89 @@ func TestLsDefaultPath(t *testing.T) {
 	withSuppressedStdout(t, func() {
 		assert.NoError(t, Ls(".", false))
 	})
+}
+
+func TestReadlink(t *testing.T) {
+	cleanup := startMockDaemon(t)
+	defer cleanup()
+	withSuppressedStdout(t, func() {
+		assert.NoError(t, Readlink("/usr/bin/python"))
+	})
+}
+
+func TestReadlinkDaemonError(t *testing.T) {
+	cleanup := startErrorDaemon(t)
+	defer cleanup()
+	err := Readlink("/usr/bin/python")
+	assert.NotNil(t, err)
+}
+
+func TestPrintResponseJSON(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = true
+	defer func() { OutputJSON = false }()
+
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"stdout": "hello\n", "stderr": "", "exit_code": float64(0)},
+	}, "exec")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextExec(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"stdout": "hello\n", "stderr": "", "exit_code": float64(0)},
+	}, "exec")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextLs(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK: true,
+		Data: map[string]interface{}{
+			"path": "/tmp",
+			"entries": []interface{}{
+				map[string]interface{}{
+					"name": "/tmp/dir", "size": float64(4096), "mode": "755",
+					"is_dir": true, "is_link": false,
+				},
+				map[string]interface{}{
+					"name": "/tmp/file.txt", "size": float64(100), "mode": "644",
+					"is_dir": false, "is_link": false,
+				},
+			},
+		},
+	}, "ls")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextPing(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"pong": true},
+	}, "ping")
+	assert.Nil(t, err)
 }

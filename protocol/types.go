@@ -43,7 +43,9 @@ type DirEntry struct {
 	Size    int64  `json:"size"`
 	Mode    string `json:"mode"`
 	IsDir   bool   `json:"is_dir"`
-	ModTime int64  `json:"mod_time"` // unix timestamp
+	IsLink  bool   `json:"is_link,omitempty"`
+	Target  string `json:"target,omitempty"` // symlink target
+	ModTime int64  `json:"mod_time"`         // unix timestamp
 }
 
 // DirListing is returned by the ls action.
@@ -126,6 +128,12 @@ type SystemInfo struct {
 	Disk     []DiskInfo         `json:"disk"`
 	Network  []NetworkInterface `json:"network"`
 	GPU      []GPUInfo          `json:"gpu"`
+}
+
+// ReadlinkResult is returned by the readlink action.
+type ReadlinkResult struct {
+	Path   string `json:"path"`
+	Target string `json:"target"`
 }
 
 // PingResult is returned by the ping action.

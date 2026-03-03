@@ -211,3 +211,36 @@ func TestGPUInfoTempOmitEmpty(t *testing.T) {
 	assert.True(t, contains(string(data), "temp_celsius"))
 
 }
+
+func TestReadlinkResultJSON(t *testing.T) {
+	r := ReadlinkResult{Path: "/usr/bin/python", Target: "/usr/bin/python3.11"}
+	data, err := json.Marshal(r)
+	require.Nil(t, err)
+
+	var decoded ReadlinkResult
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "/usr/bin/python", decoded.Path)
+	assert.Equal(t, "/usr/bin/python3.11", decoded.Target)
+}
+
+func TestDirEntrySymlinkJSON(t *testing.T) {
+	e := DirEntry{Name: "link", Size: 12, Mode: "777", IsDir: false, IsLink: true, Target: "/real/path", ModTime: 1709300000}
+	data, err := json.Marshal(e)
+	require.Nil(t, err)
+
+	var decoded DirEntry
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.True(t, decoded.IsLink)
+	assert.Equal(t, "/real/path", decoded.Target)
+}
+
+func TestDirEntryOmitEmpty(t *testing.T) {
+	e := DirEntry{Name: "regular", Size: 100, Mode: "644", IsDir: false}
+	data, err := json.Marshal(e)
+	require.Nil(t, err)
+
+	s := string(data)
+	// is_link and target should be omitted when empty
+	assert.False(t, contains(s, "is_link"))
+	assert.False(t, contains(s, "target"))
+}
