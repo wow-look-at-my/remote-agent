@@ -12,45 +12,35 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestSafeBuffer(t *testing.T) {
 	var buf safeBuffer
+	assert.
 
 	// Empty buffer
-	if len(buf.Bytes()) != 0 {
-		t.Error("empty buffer should have 0 bytes")
-	}
+	Equal(t, 0, len(buf.Bytes()))
 
 	// Write some data
 	n, err := buf.Write([]byte("hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 5 {
-		t.Errorf("wrote %d, want 5", n)
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 5, n)
 
 	// Write more data
 	n, err = buf.Write([]byte(" world"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 6 {
-		t.Errorf("wrote %d, want 6", n)
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 6, n)
+	assert.Equal(t,// Check accumulated content
+	"hello world", string(buf.Bytes()))
 
-	// Check accumulated content
-	if string(buf.Bytes()) != "hello world" {
-		t.Errorf("content = %q, want %q", string(buf.Bytes()), "hello world")
-	}
 }
 
 func TestSafeBufferEmpty(t *testing.T) {
 	var buf safeBuffer
-	if buf.Bytes() != nil {
-		t.Error("Bytes() on empty buffer should be nil")
-	}
+	assert.Nil(t, buf.Bytes())
+
 }
 
 func TestSafeBufferBinaryData(t *testing.T) {
@@ -58,43 +48,33 @@ func TestSafeBufferBinaryData(t *testing.T) {
 	data := []byte{0x00, 0x01, 0xff, 0xfe}
 	buf.Write(data)
 	got := buf.Bytes()
-	if len(got) != 4 || got[0] != 0x00 || got[2] != 0xff {
-		t.Errorf("binary data mismatch: %v", got)
-	}
+	assert.False(t, len(got) != 4 || got[0] != 0x00 || got[2] != 0xff)
+
 }
 
 func TestConnResultFields(t *testing.T) {
 	cr := ConnResult{
-		Fingerprint: "SHA256:test",
-		User:        "admin",
-		Host:        "example.com",
-		Port:        22,
+		Fingerprint:	"SHA256:test",
+		User:		"admin",
+		Host:		"example.com",
+		Port:		22,
 	}
-	if cr.Fingerprint != "SHA256:test" {
-		t.Errorf("fingerprint = %q", cr.Fingerprint)
-	}
-	if cr.User != "admin" {
-		t.Errorf("user = %q", cr.User)
-	}
-	if cr.Host != "example.com" {
-		t.Errorf("host = %q", cr.Host)
-	}
-	if cr.Port != 22 {
-		t.Errorf("port = %d", cr.Port)
-	}
+	assert.Equal(t, "SHA256:test", cr.Fingerprint)
+	assert.Equal(t, "admin", cr.User)
+	assert.Equal(t, "example.com", cr.Host)
+	assert.Equal(t, 22, cr.Port)
+
 }
 
 // generateTestKey creates a test ED25519 key pair and returns the signer.
 func generateTestKey(t *testing.T) ssh.Signer {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	signer, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	return signer
 }
 
@@ -102,21 +82,16 @@ func generateTestKey(t *testing.T) ssh.Signer {
 func writeTestKey(t *testing.T, path string) ssh.Signer {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	// Marshal to OpenSSH format
 	privBytes, err := ssh.MarshalPrivateKey(priv, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, pem.EncodeToMemory(privBytes), 0600); err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(privBytes), 0600))
+
 	signer, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	return signer
 }
 
@@ -133,9 +108,7 @@ func startTestSSHServer(t *testing.T) (addr string, cleanup func()) {
 	config.AddHostKey(hostKey)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	go func() {
 		for {
@@ -230,18 +203,11 @@ func TestRunCommand(t *testing.T) {
 	defer client.Close()
 
 	stdout, stderr, exitCode, err := RunCommand(client, "echo pong")
-	if err != nil {
-		t.Fatalf("RunCommand error: %v", err)
-	}
-	if exitCode != 0 {
-		t.Errorf("exit code = %d, want 0", exitCode)
-	}
-	if string(stdout) != "pong\n" {
-		t.Errorf("stdout = %q, want %q", string(stdout), "pong\n")
-	}
-	if len(stderr) != 0 {
-		t.Errorf("stderr = %q, want empty", string(stderr))
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, "pong\n", string(stdout))
+	assert.Equal(t, 0, len(stderr))
+
 }
 
 func TestRunCommandNonZeroExit(t *testing.T) {
@@ -252,12 +218,9 @@ func TestRunCommandNonZeroExit(t *testing.T) {
 	defer client.Close()
 
 	_, _, exitCode, err := RunCommand(client, "exit 42")
-	if err != nil {
-		t.Fatalf("RunCommand error: %v", err)
-	}
-	if exitCode != 42 {
-		t.Errorf("exit code = %d, want 42", exitCode)
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 42, exitCode)
+
 }
 
 func TestRunCommandWithStdin(t *testing.T) {
@@ -269,15 +232,10 @@ func TestRunCommandWithStdin(t *testing.T) {
 
 	input := []byte("hello from stdin")
 	stdout, _, exitCode, err := RunCommandWithStdin(client, "cat", input)
-	if err != nil {
-		t.Fatalf("RunCommandWithStdin error: %v", err)
-	}
-	if exitCode != 0 {
-		t.Errorf("exit code = %d, want 0", exitCode)
-	}
-	if string(stdout) != "hello from stdin" {
-		t.Errorf("stdout = %q, want %q", string(stdout), "hello from stdin")
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, "hello from stdin", string(stdout))
+
 }
 
 func TestRunCommandWithStdinEmpty(t *testing.T) {
@@ -289,27 +247,21 @@ func TestRunCommandWithStdinEmpty(t *testing.T) {
 
 	// Test with empty stdin
 	stdout, _, exitCode, err := RunCommandWithStdin(client, "cat", nil)
-	if err != nil {
-		t.Fatalf("RunCommandWithStdin error: %v", err)
-	}
-	if exitCode != 0 {
-		t.Errorf("exit code = %d, want 0", exitCode)
-	}
-	if len(stdout) != 0 {
-		t.Errorf("stdout = %q, want empty", string(stdout))
-	}
+	require.Nil(t, err)
+	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, 0, len(stdout))
+
 }
 
 func dialTestServer(t *testing.T, addr string) *ssh.Client {
 	t.Helper()
 	config := &ssh.ClientConfig{
-		User:            "test",
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User:			"test",
+		HostKeyCallback:	ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := ssh.Dial("tcp", addr, config)
-	if err != nil {
-		t.Fatalf("dial test server: %v", err)
-	}
+	require.Nil(t, err)
+
 	return client
 }
 
@@ -322,18 +274,13 @@ func TestBuildAuthMethodsWithKeyFile(t *testing.T) {
 	writeTestKey(t, filepath.Join(sshDir, "id_ed25519"))
 
 	t.Setenv("HOME", home)
-	t.Setenv("SSH_AUTH_SOCK", "") // disable agent
+	t.Setenv("SSH_AUTH_SOCK", "")	// disable agent
 
 	methods, fingerprint, err := buildAuthMethods()
-	if err != nil {
-		t.Fatalf("buildAuthMethods error: %v", err)
-	}
-	if len(methods) == 0 {
-		t.Error("expected at least one auth method")
-	}
-	if fingerprint == "" || fingerprint == "unknown" {
-		t.Errorf("fingerprint = %q, want valid fingerprint", fingerprint)
-	}
+	require.Nil(t, err)
+	assert.NotEqual(t, 0, len(methods))
+	assert.False(t, fingerprint == "" || fingerprint == "unknown")
+
 }
 
 func TestBuildAuthMethodsNoMethods(t *testing.T) {
@@ -345,20 +292,16 @@ func TestBuildAuthMethodsNoMethods(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	_, _, err := buildAuthMethods()
-	if err == nil {
-		t.Error("expected error when no auth methods available")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestBuildHostKeyCallbackNoKnownHosts(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	callback, err := buildHostKeyCallback()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if callback == nil {
-		t.Error("callback should not be nil (should use insecure fallback)")
-	}
+	require.Nil(t, err)
+	assert.NotNil(t, callback)
+
 }
 
 func TestBuildHostKeyCallbackWithKnownHosts(t *testing.T) {
@@ -374,12 +317,9 @@ func TestBuildHostKeyCallbackWithKnownHosts(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	callback, err := buildHostKeyCallback()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if callback == nil {
-		t.Error("callback should not be nil")
-	}
+	require.Nil(t, err)
+	assert.NotNil(t, callback)
+
 }
 
 func TestConnectInvalidHost(t *testing.T) {
@@ -394,9 +334,8 @@ func TestConnectInvalidHost(t *testing.T) {
 
 	// Connect to an address that will be refused
 	_, err := Connect("127.0.0.1", 1, "user")
-	if err == nil {
-		t.Error("expected error connecting to invalid host")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestConnectDefaultPort(t *testing.T) {
@@ -410,9 +349,8 @@ func TestConnectDefaultPort(t *testing.T) {
 
 	// Port 0 should default to 22 and fail (no server on 22)
 	_, err := Connect("127.0.0.1", 0, "user")
-	if err == nil {
-		t.Error("expected error (no SSH server on port 22)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestConnectSuccess(t *testing.T) {
@@ -440,32 +378,19 @@ func TestConnectSuccess(t *testing.T) {
 	defer func() { keepAliveInterval = oldInterval }()
 
 	result, err := Connect(host, port, "testuser")
-	if err != nil {
-		t.Fatalf("Connect error: %v", err)
-	}
-	defer result.Client.Close()
+	require.Nil(t, err)
 
-	if result.User != "testuser" {
-		t.Errorf("user = %q, want %q", result.User, "testuser")
-	}
-	if result.Host != host {
-		t.Errorf("host = %q, want %q", result.Host, host)
-	}
-	if result.Port != port {
-		t.Errorf("port = %d, want %d", result.Port, port)
-	}
-	if result.Fingerprint == "" {
-		t.Error("fingerprint should not be empty")
-	}
+	defer result.Client.Close()
+	assert.Equal(t, "testuser", result.User)
+	assert.Equal(t, host, result.Host)
+	assert.Equal(t, port, result.Port)
+	assert.NotEqual(t, "", result.Fingerprint)
 
 	// Verify we can run commands through this connection
 	stdout, _, exitCode, err := RunCommand(result.Client, "echo pong")
-	if err != nil {
-		t.Fatalf("RunCommand through Connect: %v", err)
-	}
-	if exitCode != 0 || string(stdout) != "pong\n" {
-		t.Errorf("unexpected result: exit=%d stdout=%q", exitCode, string(stdout))
-	}
+	require.Nil(t, err)
+	assert.False(t, exitCode != 0 || string(stdout) != "pong\n")
+
 }
 
 func TestKeepAlive(t *testing.T) {

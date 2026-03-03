@@ -9,37 +9,29 @@ import (
 	"testing"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/testify/assert"
 )
 
 func TestHandlerUnknownAction(t *testing.T) {
 	h := &Handler{daemon: &Daemon{}}
 	resp := h.Handle(&protocol.DaemonRequest{Action: "nonexistent"})
-	if resp.OK {
-		t.Error("should not be OK for unknown action")
-	}
-	if resp.Error == "" {
-		t.Error("should have error message")
-	}
+	assert.False(t, resp.OK)
+	assert.NotEqual(t, "", resp.Error)
+
 }
 
 func TestOkResponse(t *testing.T) {
 	resp := okResponse("test")
-	if !resp.OK {
-		t.Error("should be OK")
-	}
-	if resp.Data != "test" {
-		t.Error("data should be 'test'")
-	}
+	assert.True(t, resp.OK)
+	assert.Equal(t, "test", resp.Data)
+
 }
 
 func TestErrResponse(t *testing.T) {
 	resp := errResponse(fmt.Errorf("test error"))
-	if resp.OK {
-		t.Error("should not be OK")
-	}
-	if resp.Error != "test error" {
-		t.Errorf("error = %q, want %q", resp.Error, "test error")
-	}
+	assert.False(t, resp.OK)
+	assert.Equal(t, "test error", resp.Error)
+
 }
 
 // TestHandleDispatch tests that Handle routes each action correctly.
@@ -49,9 +41,8 @@ func TestHandleDispatchPing(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{Action: "ping"})
-	if !resp.OK {
-		t.Errorf("ping should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchExec(t *testing.T) {
@@ -60,12 +51,11 @@ func TestHandleDispatchExec(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "exec",
-		Params: map[string]any{"command": "ls"},
+		Action:	"exec",
+		Params:	map[string]any{"command": "ls"},
 	})
-	if !resp.OK {
-		t.Errorf("exec should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchRead(t *testing.T) {
@@ -75,12 +65,11 @@ func TestHandleDispatchRead(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "read",
-		Params: map[string]any{"path": "/etc/hostname"},
+		Action:	"read",
+		Params:	map[string]any{"path": "/etc/hostname"},
 	})
-	if !resp.OK {
-		t.Errorf("read should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchWrite(t *testing.T) {
@@ -88,12 +77,11 @@ func TestHandleDispatchWrite(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "write",
-		Params: map[string]any{"path": "/tmp/test", "content": "hello"},
+		Action:	"write",
+		Params:	map[string]any{"path": "/tmp/test", "content": "hello"},
 	})
-	if !resp.OK {
-		t.Errorf("write should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchUpload(t *testing.T) {
@@ -105,12 +93,11 @@ func TestHandleDispatchUpload(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "upload",
-		Params: map[string]any{"local_path": localFile, "remote_path": "/tmp/remote"},
+		Action:	"upload",
+		Params:	map[string]any{"local_path": localFile, "remote_path": "/tmp/remote"},
 	})
-	if !resp.OK {
-		t.Errorf("upload should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchDownload(t *testing.T) {
@@ -122,12 +109,11 @@ func TestHandleDispatchDownload(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "download",
-		Params: map[string]any{"remote_path": "/tmp/remote", "local_path": localPath},
+		Action:	"download",
+		Params:	map[string]any{"remote_path": "/tmp/remote", "local_path": localPath},
 	})
-	if !resp.OK {
-		t.Errorf("download should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchEdit(t *testing.T) {
@@ -138,12 +124,11 @@ func TestHandleDispatchEdit(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "edit",
-		Params: map[string]any{"path": "/tmp/f", "old": "a", "new": "b"},
+		Action:	"edit",
+		Params:	map[string]any{"path": "/tmp/f", "old": "a", "new": "b"},
 	})
-	if !resp.OK {
-		t.Errorf("edit should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchLs(t *testing.T) {
@@ -152,12 +137,11 @@ func TestHandleDispatchLs(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action: "ls",
-		Params: map[string]any{"path": "/tmp"},
+		Action:	"ls",
+		Params:	map[string]any{"path": "/tmp"},
 	})
-	if !resp.OK {
-		t.Errorf("ls should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchPs(t *testing.T) {
@@ -168,9 +152,8 @@ func TestHandleDispatchPs(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{Action: "ps"})
-	if !resp.OK {
-		t.Errorf("ps should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchSysinfo(t *testing.T) {
@@ -181,9 +164,8 @@ func TestHandleDispatchSysinfo(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{Action: "sysinfo"})
-	if !resp.OK {
-		t.Errorf("sysinfo should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleDispatchDisconnect(t *testing.T) {
@@ -194,16 +176,15 @@ func TestHandleDispatchDisconnect(t *testing.T) {
 
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:     mock,
-		remotePath: "/tmp/.remote-agent-test",
-		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+		runner:		mock,
+		remotePath:	"/tmp/.remote-agent-test",
+		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
 	}
 	h := &Handler{daemon: d}
 
 	resp := h.Handle(&protocol.DaemonRequest{Action: "disconnect"})
-	if !resp.OK {
-		t.Errorf("disconnect should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 	<-done
 }

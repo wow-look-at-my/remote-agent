@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestEditFile(t *testing.T) {
@@ -12,24 +14,18 @@ func TestEditFile(t *testing.T) {
 	os.WriteFile(path, []byte("hello world"), 0644)
 
 	result, err := EditFile(path, "hello", "goodbye")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Modified {
-		t.Error("should be modified")
-	}
+	require.Nil(t, err)
+	assert.True(t, result.Modified)
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "goodbye world" {
-		t.Errorf("content = %q, want %q", string(data), "goodbye world")
-	}
+	assert.Equal(t, "goodbye world", string(data))
+
 }
 
 func TestEditFileNotFound(t *testing.T) {
 	_, err := EditFile("/nonexistent/path/file.txt", "a", "b")
-	if err == nil {
-		t.Error("expected error for nonexistent file")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestEditFileTextNotFound(t *testing.T) {
@@ -38,9 +34,8 @@ func TestEditFileTextNotFound(t *testing.T) {
 	os.WriteFile(path, []byte("hello world"), 0644)
 
 	_, err := EditFile(path, "nonexistent", "replacement")
-	if err == nil {
-		t.Error("expected error when text not found")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestEditFilePreservesPermissions(t *testing.T) {
@@ -51,10 +46,10 @@ func TestEditFilePreservesPermissions(t *testing.T) {
 	EditFile(path, "hello", "goodbye")
 
 	fi, _ := os.Stat(path)
+	assert.
 	// Compare just the permission bits
-	if fi.Mode().Perm() != 0755 {
-		t.Errorf("mode = %o, want %o", fi.Mode().Perm(), 0755)
-	}
+	Equal(t, 0755, fi.Mode().Perm())
+
 }
 
 func TestEditFileOnlyReplacesFirst(t *testing.T) {
@@ -65,9 +60,8 @@ func TestEditFileOnlyReplacesFirst(t *testing.T) {
 	EditFile(path, "a", "b")
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "baa" {
-		t.Errorf("content = %q, want %q", string(data), "baa")
-	}
+	assert.Equal(t, "baa", string(data))
+
 }
 
 func TestEditFileMultiline(t *testing.T) {
@@ -78,9 +72,8 @@ func TestEditFileMultiline(t *testing.T) {
 	EditFile(path, "line2\nline3", "replaced")
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "line1\nreplaced\n" {
-		t.Errorf("content = %q", string(data))
-	}
+	assert.Equal(t, "line1\nreplaced\n", string(data))
+
 }
 
 func TestEditFileEmptyReplacement(t *testing.T) {
@@ -91,7 +84,6 @@ func TestEditFileEmptyReplacement(t *testing.T) {
 	EditFile(path, "remove me ", "")
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "please" {
-		t.Errorf("content = %q, want %q", string(data), "please")
-	}
+	assert.Equal(t, "please", string(data))
+
 }

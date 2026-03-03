@@ -3,13 +3,13 @@ package agent
 import (
 	"fmt"
 	"testing"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestNewLogger(t *testing.T) {
 	logger := NewLogger()
-	if logger == nil {
-		t.Fatal("logger should not be nil")
-	}
+	require.NotNil(t, logger)
+
 	defer logger.Close()
 }
 

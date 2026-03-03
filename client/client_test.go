@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 // startMockDaemon creates a mock daemon that accepts connections and responds with okData.
@@ -18,9 +20,7 @@ func startMockDaemon(t *testing.T) (cleanup func()) {
 
 	sockPath := filepath.Join(dir, "remote-agent-mock123.sock")
 	l, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	go func() {
 		for {
@@ -33,8 +33,8 @@ func startMockDaemon(t *testing.T) (cleanup func()) {
 				var req protocol.DaemonRequest
 				json.NewDecoder(c).Decode(&req)
 				resp := protocol.DaemonResponse{
-					OK:   true,
-					Data: map[string]string{"action": req.Action},
+					OK:	true,
+					Data:	map[string]string{"action": req.Action},
 				}
 				json.NewEncoder(c).Encode(resp)
 			}(conn)
@@ -47,9 +47,8 @@ func startMockDaemon(t *testing.T) (cleanup func()) {
 func TestFindSocketNone(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	_, err := findSocket()
-	if err == nil {
-		t.Error("expected error when no socket exists")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestFindSocketOne(t *testing.T) {
@@ -58,18 +57,14 @@ func TestFindSocketOne(t *testing.T) {
 
 	sockPath := filepath.Join(dir, "remote-agent-abc123.sock")
 	l, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	defer l.Close()
 
 	found, err := findSocket()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if found != sockPath {
-		t.Errorf("found = %q, want %q", found, sockPath)
-	}
+	require.Nil(t, err)
+	assert.Equal(t, sockPath, found)
+
 }
 
 func TestFindSocketMultiple(t *testing.T) {
@@ -84,9 +79,8 @@ func TestFindSocketMultiple(t *testing.T) {
 	defer l2.Close()
 
 	_, err := findSocket()
-	if err == nil {
-		t.Error("expected error when multiple sockets exist")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestSendRequestAndReceive(t *testing.T) {
@@ -94,19 +88,14 @@ func TestSendRequestAndReceive(t *testing.T) {
 	defer cleanup()
 
 	resp, err := sendRequest(&protocol.DaemonRequest{Action: "ping"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !resp.OK {
-		t.Error("response should be OK")
-	}
+	require.Nil(t, err)
+	assert.True(t, resp.OK)
+
 }
 
 func TestPrintResponse(t *testing.T) {
 	err := printResponse(&protocol.DaemonResponse{Error: "test error"})
-	if err == nil {
-		t.Error("expected error from error response")
-	}
+	assert.NotNil(t, err)
 
 	old := os.Stdout
 	f, _ := os.CreateTemp(t.TempDir(), "stdout")
@@ -114,50 +103,47 @@ func TestPrintResponse(t *testing.T) {
 	defer func() { os.Stdout = old }()
 
 	err = printResponse(&protocol.DaemonResponse{OK: true, Data: "hello"})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	assert.Nil(t, err)
+
 }
 
 func TestRunConnectMissingTarget(t *testing.T) {
 	err := RunConnect(nil)
-	if err == nil {
-		t.Error("expected error with no target")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunExecMissingCommand(t *testing.T) {
 	err := RunExec(nil)
-	if err == nil {
-		t.Error("expected error with no command")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunUploadMissingArgs(t *testing.T) {
-	if err := RunUpload(nil); err == nil {
-		t.Error("expected error with no args")
-	}
-	if err := RunUpload([]string{"one"}); err == nil {
-		t.Error("expected error with one arg")
-	}
+	err := RunUpload(nil)
+	assert.NotNil(t, err)
+
+	err = RunUpload([]string{"one"})
+	assert.NotNil(t, err)
+
 }
 
 func TestRunDownloadMissingArgs(t *testing.T) {
-	if err := RunDownload(nil); err == nil {
-		t.Error("expected error with no args")
-	}
+	err := RunDownload(nil)
+	assert.NotNil(t, err)
+
 }
 
 func TestRunReadMissingPath(t *testing.T) {
-	if err := RunRead(nil); err == nil {
-		t.Error("expected error with no path")
-	}
+	err := RunRead(nil)
+	assert.NotNil(t, err)
+
 }
 
 func TestRunEditMissingArgs(t *testing.T) {
-	if err := RunEdit(nil); err == nil {
-		t.Error("expected error with no args")
-	}
+	err := RunEdit(nil)
+	assert.NotNil(t, err)
+
 }
 
 // Test that all commands talk to the daemon correctly.
@@ -175,9 +161,8 @@ func TestRunDisconnect(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunDisconnect(nil); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunDisconnect(nil))
+
 	})
 }
 
@@ -185,9 +170,8 @@ func TestRunExecWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunExec([]string{"ls", "-la"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunExec([]string{"ls", "-la"}))
+
 	})
 }
 
@@ -195,9 +179,8 @@ func TestRunUploadWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunUpload([]string{"/tmp", "/remote/path"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunUpload([]string{"/tmp", "/remote/path"}))
+
 	})
 }
 
@@ -205,9 +188,8 @@ func TestRunDownloadWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunDownload([]string{"/remote", "/local"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunDownload([]string{"/remote", "/local"}))
+
 	})
 }
 
@@ -215,9 +197,8 @@ func TestRunReadWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunRead([]string{"/remote/file"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunRead([]string{"/remote/file"}))
+
 	})
 }
 
@@ -234,9 +215,8 @@ func TestRunWriteWithDaemon(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	withSuppressedStdout(t, func() {
-		if err := RunWrite([]string{"/remote/file"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunWrite([]string{"/remote/file"}))
+
 	})
 }
 
@@ -244,9 +224,8 @@ func TestRunEditWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunEdit([]string{"--old", "hello", "--new", "world", "/remote/file"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunEdit([]string{"--old", "hello", "--new", "world", "/remote/file"}))
+
 	})
 }
 
@@ -254,9 +233,8 @@ func TestRunLsWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunLs([]string{"/tmp"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunLs([]string{"/tmp"}))
+
 	})
 }
 
@@ -264,9 +242,8 @@ func TestRunLsRecursive(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunLs([]string{"--recursive", "/tmp"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunLs([]string{"--recursive", "/tmp"}))
+
 	})
 }
 
@@ -274,9 +251,8 @@ func TestRunPsWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunPs(nil); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunPs(nil))
+
 	})
 }
 
@@ -284,9 +260,8 @@ func TestRunPsWithFilter(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunPs([]string{"--filter", "nginx"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunPs([]string{"--filter", "nginx"}))
+
 	})
 }
 
@@ -294,9 +269,8 @@ func TestRunSysinfoWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunSysinfo(nil); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunSysinfo(nil))
+
 	})
 }
 
@@ -304,9 +278,8 @@ func TestRunPingWithDaemon(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		if err := RunPing(nil); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunPing(nil))
+
 	})
 }
 
@@ -318,9 +291,7 @@ func startErrorDaemon(t *testing.T) (cleanup func()) {
 
 	sockPath := filepath.Join(dir, "remote-agent-err123.sock")
 	l, err := net.Listen("unix", sockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	go func() {
 		for {
@@ -347,45 +318,40 @@ func TestRunExecDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunExec([]string{"ls"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunDisconnectDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunDisconnect(nil)
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunUploadDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunUpload([]string{"/tmp", "/remote"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunDownloadDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunDownload([]string{"/remote", "/local"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunReadDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunRead([]string{"/remote/file"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunWriteDaemonError(t *testing.T) {
@@ -400,62 +366,55 @@ func TestRunWriteDaemonError(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	err := RunWrite([]string{"/remote/file"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunEditDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunEdit([]string{"--old", "a", "--new", "b", "/remote/file"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunLsDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunLs([]string{"/tmp"})
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunPsDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunPs(nil)
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunSysinfoDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunSysinfo(nil)
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunPingDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := RunPing(nil)
-	if err == nil {
-		t.Error("expected error from daemon")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestSendRequestNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	_, err := sendRequest(&protocol.DaemonRequest{Action: "ping"})
-	if err == nil {
-		t.Error("expected error when no socket")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestSendRequestStaleSocket(t *testing.T) {
@@ -465,34 +424,30 @@ func TestSendRequestStaleSocket(t *testing.T) {
 	// Create a socket file but don't listen on it (stale)
 	sockPath := filepath.Join(dir, "remote-agent-stale.sock")
 	l, _ := net.Listen("unix", sockPath)
-	l.Close() // Close immediately - socket file remains but nobody is listening
+	l.Close()	// Close immediately - socket file remains but nobody is listening
 
 	_, err := sendRequest(&protocol.DaemonRequest{Action: "ping"})
-	if err == nil {
-		t.Error("expected error for stale socket")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunConnectWithPort(t *testing.T) {
 	// Test flag parsing - this will fail at SSH connect but exercises the flag parsing code
 	err := RunConnect([]string{"--port", "2222", "user@host"})
-	if err == nil {
-		t.Error("expected error (no SSH server)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunConnectBadFlags(t *testing.T) {
 	err := RunConnect([]string{"--invalid-flag"})
-	if err == nil {
-		t.Error("expected error for invalid flag")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunWriteMissingPath(t *testing.T) {
 	err := RunWrite(nil)
-	if err == nil {
-		t.Error("expected error with no path")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunWriteWithMode(t *testing.T) {
@@ -507,25 +462,24 @@ func TestRunWriteWithMode(t *testing.T) {
 	defer func() { os.Stdin = oldStdin }()
 
 	withSuppressedStdout(t, func() {
-		if err := RunWrite([]string{"--mode", "0755", "/remote/file"}); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, RunWrite([]string{"--mode", "0755", "/remote/file"}))
+
 	})
 }
 
 func TestRunDownloadMissingSecondArg(t *testing.T) {
-	if err := RunDownload([]string{"one"}); err == nil {
-		t.Error("expected error with only one arg")
-	}
+	err := RunDownload([]string{"one"})
+	assert.NotNil(t, err)
+
 }
 
 func TestRunLsDefaultPath(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
+		assert.
 		// No path argument - should default to "."
-		if err := RunLs(nil); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		NoError(t, RunLs(nil))
+
 	})
 }

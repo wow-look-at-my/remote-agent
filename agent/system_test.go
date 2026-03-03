@@ -2,118 +2,94 @@ package agent
 
 import (
 	"testing"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestGatherSystemInfo(t *testing.T) {
 	info, err := GatherSystemInfo()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+	assert.NotEqual(t,// Hostname should be non-empty
+	"", info.Hostname)
+	assert.NotEqual(t,// Arch should match
+	"", info.Arch)
+	assert.Greater(t,// CPU should have threads > 0 (we're running on a real system)
+	info.CPU.Threads, 0)
+	assert.Greater(t,// Memory total should be > 0
+	info.Memory.TotalBytes, 0)
+	assert.Greater(t,// Memory used should be > 0
+	info.Memory.UsedBytes, 0)
 
-	// Hostname should be non-empty
-	if info.Hostname == "" {
-		t.Error("hostname should not be empty")
-	}
-
-	// Arch should match
-	if info.Arch == "" {
-		t.Error("arch should not be empty")
-	}
-
-	// CPU should have threads > 0 (we're running on a real system)
-	if info.CPU.Threads <= 0 {
-		t.Errorf("cpu.threads = %d, want > 0", info.CPU.Threads)
-	}
-
-	// Memory total should be > 0
-	if info.Memory.TotalBytes <= 0 {
-		t.Errorf("memory.total = %d, want > 0", info.Memory.TotalBytes)
-	}
-
-	// Memory used should be > 0
-	if info.Memory.UsedBytes <= 0 {
-		t.Errorf("memory.used = %d, want > 0", info.Memory.UsedBytes)
-	}
 }
 
 func TestReadOSRelease(t *testing.T) {
 	result := readOSRelease()
+	assert.
 	// On a real system, this should not be "unknown"
-	if result == "" {
-		t.Error("os release should not be empty")
-	}
+	NotEqual(t, "", result)
+
 }
 
 func TestReadUptime(t *testing.T) {
 	result := readUptime()
-	if result == "" {
-		t.Error("uptime should not be empty")
-	}
+	assert.NotEqual(t, "", result)
+
 }
 
 func TestReadCPUInfo(t *testing.T) {
 	info := readCPUInfo()
-	if info.Threads <= 0 {
-		t.Errorf("threads = %d, want > 0", info.Threads)
-	}
+	assert.Greater(t, info.Threads, 0)
+
 }
 
 func TestReadMemoryInfo(t *testing.T) {
 	info := readMemoryInfo()
-	if info.TotalBytes <= 0 {
-		t.Errorf("total = %d, want > 0", info.TotalBytes)
-	}
-	if info.UsedBytes < 0 {
-		t.Errorf("used = %d, want >= 0", info.UsedBytes)
-	}
+	assert.Greater(t, info.TotalBytes, 0)
+	assert.GreaterOrEqual(t, info.UsedBytes, 0)
+
 }
 
 func TestReadDiskInfo(t *testing.T) {
 	disks := readDiskInfo()
+	assert.
 	// There should be at least one disk (root filesystem)
-	if len(disks) == 0 {
-		t.Error("expected at least one disk")
-	}
+	NotEqual(t, 0, len(disks))
+
 	for _, d := range disks {
-		if d.MountPoint == "" {
-			t.Error("disk mount point should not be empty")
-		}
-		if d.TotalBytes <= 0 {
-			t.Errorf("disk %s total = %d, want > 0", d.MountPoint, d.TotalBytes)
-		}
+		assert.NotEqual(t, "", d.MountPoint)
+		assert.Greater(t, d.TotalBytes, 0)
+
 	}
 }
 
 func TestReadNetworkInfo(t *testing.T) {
 	interfaces := readNetworkInfo()
+	assert.
 	// There should be at least lo
-	if len(interfaces) == 0 {
-		t.Error("expected at least one network interface")
-	}
+	NotEqual(t, 0, len(interfaces))
+
 	foundLo := false
 	for _, iface := range interfaces {
 		if iface.Name == "lo" {
 			foundLo = true
-			if iface.State != "up" {
-				t.Error("lo should be up")
-			}
+			assert.Equal(t, "up", iface.State)
+
 		}
 	}
-	if !foundLo {
-		t.Error("expected to find loopback interface")
-	}
+	assert.True(t, foundLo)
+
 }
 
 func TestReadGPUInfo(t *testing.T) {
 	// GPU info may be empty (no GPU), should not panic
 	gpus := readGPUInfo()
-	_ = gpus // just verify it doesn't crash
+	_ = gpus	// just verify it doesn't crash
 }
 
 func TestParseKBValue(t *testing.T) {
 	tests := []struct {
-		input string
-		want  int64
+		input	string
+		want	int64
 	}{
 		{"1024 kB", 1024},
 		{"0 kB", 0},
@@ -123,8 +99,7 @@ func TestParseKBValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := parseKBValue(tt.input)
-		if got != tt.want {
-			t.Errorf("parseKBValue(%q) = %d, want %d", tt.input, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
+
 	}
 }

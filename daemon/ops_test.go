@@ -9,34 +9,36 @@ import (
 	"testing"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 // mockRunner records commands and returns configured responses.
 type mockRunner struct {
-	calls     []mockCall
-	responses map[string]mockResponse
+	calls		[]mockCall
+	responses	map[string]mockResponse
 	// fallback response for unmatched commands
-	defaultResponse mockResponse
+	defaultResponse	mockResponse
 }
 
 type mockCall struct {
-	Command string
-	Stdin   []byte
+	Command	string
+	Stdin	[]byte
 }
 
 type mockResponse struct {
-	stdout   []byte
-	stderr   []byte
-	exitCode int
-	err      error
+	stdout		[]byte
+	stderr		[]byte
+	exitCode	int
+	err		error
 }
 
 func newMockRunner() *mockRunner {
 	return &mockRunner{
-		responses: make(map[string]mockResponse),
+		responses:	make(map[string]mockResponse),
 		defaultResponse: mockResponse{
-			stdout:   []byte(""),
-			exitCode: 0,
+			stdout:		[]byte(""),
+			exitCode:	0,
 		},
 	}
 }
@@ -72,8 +74,8 @@ func (m *mockRunner) onCommandFail(cmd string, err error) {
 func newTestHandler() (*Handler, *mockRunner) {
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:     mock,
-		remotePath: "/tmp/.remote-agent-test",
+		runner:		mock,
+		remotePath:	"/tmp/.remote-agent-test",
 	}
 	return &Handler{daemon: d}, mock
 }
@@ -83,9 +85,8 @@ func TestHandlePing(t *testing.T) {
 	mock.onCommand("echo pong", []byte("pong\n"), 0)
 
 	resp := h.handlePing()
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandlePingFail(t *testing.T) {
@@ -93,9 +94,8 @@ func TestHandlePingFail(t *testing.T) {
 	mock.onCommandFail("echo pong", fmt.Errorf("connection lost"))
 
 	resp := h.handlePing()
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleExec(t *testing.T) {
@@ -103,17 +103,15 @@ func TestHandleExec(t *testing.T) {
 	mock.onCommand("ls -la", []byte("total 0\n"), 0)
 
 	resp := h.handleExec(map[string]any{"command": "ls -la"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleExecMissingCommand(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleExec(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing command")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleExecError(t *testing.T) {
@@ -121,9 +119,8 @@ func TestHandleExecError(t *testing.T) {
 	mock.onCommandFail("whoami", fmt.Errorf("ssh error"))
 
 	resp := h.handleExec(map[string]any{"command": "whoami"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleExecWithNonZeroExit(t *testing.T) {
@@ -131,9 +128,8 @@ func TestHandleExecWithNonZeroExit(t *testing.T) {
 	mock.onCommand("false", []byte(""), 1)
 
 	resp := h.handleExec(map[string]any{"command": "false"})
-	if !resp.OK {
-		t.Errorf("non-zero exit should still be OK (exit code in data): %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleRead(t *testing.T) {
@@ -143,17 +139,15 @@ func TestHandleRead(t *testing.T) {
 	mock.onCommand("base64 '/etc/hostname'", []byte(encoded+"\n"), 0)
 
 	resp := h.handleRead(map[string]any{"path": "/etc/hostname"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleReadMissingPath(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleRead(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing path")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleReadNotFound(t *testing.T) {
@@ -161,9 +155,8 @@ func TestHandleReadNotFound(t *testing.T) {
 	mock.onCommandErr("base64 '/nonexistent'", []byte("No such file"), 1)
 
 	resp := h.handleRead(map[string]any{"path": "/nonexistent"})
-	if resp.OK {
-		t.Error("expected error for nonexistent file")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleReadFail(t *testing.T) {
@@ -171,9 +164,8 @@ func TestHandleReadFail(t *testing.T) {
 	mock.onCommandFail("base64 '/test'", fmt.Errorf("connection error"))
 
 	resp := h.handleRead(map[string]any{"path": "/test"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleWrite(t *testing.T) {
@@ -181,22 +173,17 @@ func TestHandleWrite(t *testing.T) {
 	mock.defaultResponse = mockResponse{exitCode: 0}
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+	assert.GreaterOrEqual(t,// Verify audit was called
+	len(mock.calls), 2)
 
-	// Verify audit was called
-	if len(mock.calls) < 2 {
-		t.Error("expected at least 2 calls (audit + write)")
-	}
 }
 
 func TestHandleWriteMissingPath(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleWrite(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing path")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleWriteError(t *testing.T) {
@@ -204,9 +191,8 @@ func TestHandleWriteError(t *testing.T) {
 	mock.defaultResponse = mockResponse{stderr: []byte("permission denied"), exitCode: 1}
 
 	resp := h.handleWrite(map[string]any{"path": "/root/test.txt", "content": "x"})
-	if resp.OK {
-		t.Error("expected error for permission denied")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleUpload(t *testing.T) {
@@ -218,25 +204,22 @@ func TestHandleUpload(t *testing.T) {
 	os.WriteFile(localFile, []byte("upload content"), 0644)
 
 	resp := h.handleUpload(map[string]any{"local_path": localFile, "remote_path": "/tmp/remote.txt"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleUploadMissingParams(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleUpload(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing params")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleUploadLocalNotFound(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleUpload(map[string]any{"local_path": "/nonexistent", "remote_path": "/tmp/x"})
-	if resp.OK {
-		t.Error("expected error for nonexistent local file")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleUploadSSHError(t *testing.T) {
@@ -248,9 +231,8 @@ func TestHandleUploadSSHError(t *testing.T) {
 	os.WriteFile(f, []byte("data"), 0644)
 
 	resp := h.handleUpload(map[string]any{"local_path": f, "remote_path": "/tmp/x"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleDownload(t *testing.T) {
@@ -262,22 +244,18 @@ func TestHandleDownload(t *testing.T) {
 	mock.onCommand("cat '/tmp/remote.txt'", []byte("file content"), 0)
 
 	resp := h.handleDownload(map[string]any{"remote_path": "/tmp/remote.txt", "local_path": localPath})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
 
 	data, _ := os.ReadFile(localPath)
-	if string(data) != "file content" {
-		t.Errorf("downloaded content = %q", string(data))
-	}
+	assert.Equal(t, "file content", string(data))
+
 }
 
 func TestHandleDownloadMissingParams(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleDownload(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing params")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleDownloadError(t *testing.T) {
@@ -285,9 +263,8 @@ func TestHandleDownloadError(t *testing.T) {
 	mock.onCommandErr("cat '/tmp/missing'", []byte("not found"), 1)
 
 	resp := h.handleDownload(map[string]any{"remote_path": "/tmp/missing", "local_path": "/tmp/out"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleEdit(t *testing.T) {
@@ -296,17 +273,15 @@ func TestHandleEdit(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: result, exitCode: 0}
 
 	resp := h.handleEdit(map[string]any{"path": "/tmp/file.txt", "old": "hello", "new": "world"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleEditMissingParams(t *testing.T) {
 	h, _ := newTestHandler()
 	resp := h.handleEdit(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for missing params")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleEditErrorResponse(t *testing.T) {
@@ -315,9 +290,8 @@ func TestHandleEditErrorResponse(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: errResp, exitCode: 0}
 
 	resp := h.handleEdit(map[string]any{"path": "/tmp/file.txt", "old": "missing", "new": "x"})
-	if resp.OK {
-		t.Error("expected error for text not found")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleLs(t *testing.T) {
@@ -326,9 +300,8 @@ func TestHandleLs(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleLsDefaultPath(t *testing.T) {
@@ -336,9 +309,8 @@ func TestHandleLsDefaultPath(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte(""), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleLsRecursive(t *testing.T) {
@@ -346,9 +318,8 @@ func TestHandleLsRecursive(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte("d\t4096\t755\t1709300000\t/tmp/dir\n"), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandlePs(t *testing.T) {
@@ -359,9 +330,8 @@ func TestHandlePs(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: result, exitCode: 0}
 
 	resp := h.handlePs(map[string]any{})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandlePsWithFilter(t *testing.T) {
@@ -370,22 +340,20 @@ func TestHandlePsWithFilter(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: result, exitCode: 0}
 
 	resp := h.handlePs(map[string]any{"filter": "nginx"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleSysinfo(t *testing.T) {
 	h, mock := newTestHandler()
 	result, _ := json.Marshal(protocol.SystemInfo{
-		Hostname: "test", OS: "Ubuntu", Arch: "amd64",
+		Hostname:	"test", OS: "Ubuntu", Arch: "amd64",
 	})
 	mock.defaultResponse = mockResponse{stdout: result, exitCode: 0}
 
 	resp := h.handleSysinfo()
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleSysinfoError(t *testing.T) {
@@ -393,56 +361,44 @@ func TestHandleSysinfoError(t *testing.T) {
 	mock.defaultResponse = mockResponse{stderr: []byte("error"), exitCode: 1}
 
 	resp := h.handleSysinfo()
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestParseLsOutput(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t/tmp/subdir\nregular file\t100\t644\t1709300000\t/tmp/test.txt\n"
 	entries := parseLsOutput(output)
+	require.Equal(t, 2, len(entries))
+	assert.True(t, entries[0].IsDir)
+	assert.False(t, entries[1].IsDir)
+	assert.Equal(t, int64(100), entries[1].Size)
 
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-	if !entries[0].IsDir {
-		t.Error("first entry should be a directory")
-	}
-	if entries[1].IsDir {
-		t.Error("second entry should not be a directory")
-	}
-	if entries[1].Size != 100 {
-		t.Errorf("second entry size = %d, want 100", entries[1].Size)
-	}
 }
 
 func TestParseLsOutputSkipsDotEntries(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t.\nd\t4096\t755\t1709300000\t..\nd\t4096\t755\t1709300000\t/tmp/real\n"
 	entries := parseLsOutput(output)
-	if len(entries) != 1 {
-		t.Errorf("expected 1 entry (skipping . and ..), got %d", len(entries))
-	}
+	assert.Equal(t, 1, len(entries))
+
 }
 
 func TestParseLsOutputEmpty(t *testing.T) {
 	entries := parseLsOutput("")
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries, got %d", len(entries))
-	}
+	assert.Equal(t, 0, len(entries))
+
 }
 
 func TestParseLsOutputMalformed(t *testing.T) {
 	output := "not enough fields\n"
 	entries := parseLsOutput(output)
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries for malformed input, got %d", len(entries))
-	}
+	assert.Equal(t, 0, len(entries))
+
 }
 
 func TestParseInt64(t *testing.T) {
 	tests := []struct {
-		input string
-		want  int64
+		input	string
+		want	int64
 	}{
 		{"0", 0},
 		{"42", 42},
@@ -454,9 +410,8 @@ func TestParseInt64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := parseInt64(tt.input)
-		if got != tt.want {
-			t.Errorf("parseInt64(%q) = %d, want %d", tt.input, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
+
 	}
 }
 
@@ -469,17 +424,15 @@ func TestHandleDisconnect(t *testing.T) {
 
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:     mock,
-		remotePath: "/tmp/.remote-agent-test",
-		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+		runner:		mock,
+		remotePath:	"/tmp/.remote-agent-test",
+		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
 	}
 	h := &Handler{daemon: d}
 
 	resp := h.handleDisconnect()
-	if !resp.OK {
-		t.Errorf("disconnect should be OK: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
 
 	// Wait for the goroutine to complete before restoring exitFunc
 	<-done
@@ -490,9 +443,8 @@ func TestHandleReadBadBase64(t *testing.T) {
 	mock.onCommand("base64 '/test'", []byte("not-valid-base64!!!"), 0)
 
 	resp := h.handleRead(map[string]any{"path": "/test"})
-	if resp.OK {
-		t.Error("expected error for bad base64")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleWriteDefaultMode(t *testing.T) {
@@ -501,9 +453,8 @@ func TestHandleWriteDefaultMode(t *testing.T) {
 
 	// Write without specifying mode (should default to 0644)
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello", "mode": ""})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+
 }
 
 func TestHandleWriteSSHError(t *testing.T) {
@@ -511,9 +462,8 @@ func TestHandleWriteSSHError(t *testing.T) {
 	mock.defaultResponse = mockResponse{err: fmt.Errorf("ssh connection lost")}
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleUploadExitNonZero(t *testing.T) {
@@ -525,9 +475,8 @@ func TestHandleUploadExitNonZero(t *testing.T) {
 	os.WriteFile(f, []byte("data"), 0644)
 
 	resp := h.handleUpload(map[string]any{"local_path": f, "remote_path": "/tmp/x"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleDownloadSSHError(t *testing.T) {
@@ -535,9 +484,8 @@ func TestHandleDownloadSSHError(t *testing.T) {
 	mock.onCommandFail("cat '/tmp/missing'", fmt.Errorf("ssh error"))
 
 	resp := h.handleDownload(map[string]any{"remote_path": "/tmp/missing", "local_path": "/tmp/out"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleDownloadWriteLocalFail(t *testing.T) {
@@ -546,12 +494,11 @@ func TestHandleDownloadWriteLocalFail(t *testing.T) {
 
 	// Try to write to a directory that doesn't exist
 	resp := h.handleDownload(map[string]any{
-		"remote_path": "/tmp/remote",
-		"local_path":  "/nonexistent/dir/file.txt",
+		"remote_path":	"/tmp/remote",
+		"local_path":	"/nonexistent/dir/file.txt",
 	})
-	if resp.OK {
-		t.Error("expected error writing to nonexistent directory")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleEditSSHError(t *testing.T) {
@@ -559,9 +506,8 @@ func TestHandleEditSSHError(t *testing.T) {
 	mock.defaultResponse = mockResponse{err: fmt.Errorf("ssh error")}
 
 	resp := h.handleEdit(map[string]any{"path": "/tmp/f", "old": "a", "new": "b"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleEditNonZeroExit(t *testing.T) {
@@ -569,9 +515,8 @@ func TestHandleEditNonZeroExit(t *testing.T) {
 	mock.defaultResponse = mockResponse{stderr: []byte("failed"), exitCode: 1}
 
 	resp := h.handleEdit(map[string]any{"path": "/tmp/f", "old": "a", "new": "b"})
-	if resp.OK {
-		t.Error("expected error for non-zero exit")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleEditBadJSON(t *testing.T) {
@@ -579,9 +524,8 @@ func TestHandleEditBadJSON(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte("not json"), exitCode: 0}
 
 	resp := h.handleEdit(map[string]any{"path": "/tmp/f", "old": "a", "new": "b"})
-	if resp.OK {
-		t.Error("expected error for bad JSON")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleLsError(t *testing.T) {
@@ -589,9 +533,8 @@ func TestHandleLsError(t *testing.T) {
 	mock.defaultResponse = mockResponse{err: fmt.Errorf("ssh error")}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp"})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandlePsError(t *testing.T) {
@@ -599,9 +542,8 @@ func TestHandlePsError(t *testing.T) {
 	mock.defaultResponse = mockResponse{err: fmt.Errorf("ssh error")}
 
 	resp := h.handlePs(map[string]any{})
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandlePsNonZeroExit(t *testing.T) {
@@ -609,9 +551,8 @@ func TestHandlePsNonZeroExit(t *testing.T) {
 	mock.defaultResponse = mockResponse{stderr: []byte("fail"), exitCode: 1}
 
 	resp := h.handlePs(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for non-zero exit")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandlePsBadJSON(t *testing.T) {
@@ -619,9 +560,8 @@ func TestHandlePsBadJSON(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte("not json"), exitCode: 0}
 
 	resp := h.handlePs(map[string]any{})
-	if resp.OK {
-		t.Error("expected error for bad JSON")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleSysinfoSSHError(t *testing.T) {
@@ -629,9 +569,8 @@ func TestHandleSysinfoSSHError(t *testing.T) {
 	mock.defaultResponse = mockResponse{err: fmt.Errorf("ssh error")}
 
 	resp := h.handleSysinfo()
-	if resp.OK {
-		t.Error("expected error")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleSysinfoBadJSON(t *testing.T) {
@@ -639,9 +578,8 @@ func TestHandleSysinfoBadJSON(t *testing.T) {
 	mock.defaultResponse = mockResponse{stdout: []byte("not json"), exitCode: 0}
 
 	resp := h.handleSysinfo()
-	if resp.OK {
-		t.Error("expected error for bad JSON")
-	}
+	assert.False(t, resp.OK)
+
 }
 
 func TestHandleExecAudit(t *testing.T) {
@@ -649,31 +587,23 @@ func TestHandleExecAudit(t *testing.T) {
 	mock.onCommand("whoami", []byte("root\n"), 0)
 
 	resp := h.handleExec(map[string]any{"command": "whoami"})
-	if !resp.OK {
-		t.Errorf("expected OK, got error: %s", resp.Error)
-	}
+	assert.True(t, resp.OK)
+	assert.GreaterOrEqual(t,// Verify audit command was called before actual command
+	len(mock.calls), 2)
 
-	// Verify audit command was called before actual command
-	if len(mock.calls) < 2 {
-		t.Errorf("expected at least 2 calls (audit + exec), got %d", len(mock.calls))
-	}
 }
 
 func TestParseLsOutputFractionalTime(t *testing.T) {
 	output := "d\t4096\t755\t1709300000.123456\t/tmp/dir\n"
 	entries := parseLsOutput(output)
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].ModTime != 1709300000 {
-		t.Errorf("modtime = %d, want 1709300000", entries[0].ModTime)
-	}
+	require.Equal(t, 1, len(entries))
+	assert.Equal(t, int64(1709300000), entries[0].ModTime)
+
 }
 
 func TestParseLsOutputSkipsDotInPath(t *testing.T) {
 	output := "d\t4096\t755\t1709300000\t/path/to/.\nd\t4096\t755\t1709300000\t/path/to/..\nf\t100\t644\t1709300000\t/path/to/file\n"
 	entries := parseLsOutput(output)
-	if len(entries) != 1 {
-		t.Errorf("expected 1 entry, got %d", len(entries))
-	}
+	assert.Equal(t, 1, len(entries))
+
 }

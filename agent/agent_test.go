@@ -8,34 +8,32 @@ import (
 	"testing"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestRunServeNoArgs(t *testing.T) {
 	err := RunServe(nil)
-	if err == nil {
-		t.Error("expected error with no args")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunServeUnknownAction(t *testing.T) {
 	err := RunServe([]string{"unknown_action"})
-	if err == nil {
-		t.Error("expected error for unknown action")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunServeEditMissingFlags(t *testing.T) {
 	err := RunServe([]string{"edit"})
-	if err == nil {
-		t.Error("expected error for edit with no flags")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunServeAuditMissingAction(t *testing.T) {
 	err := RunServe([]string{"audit"})
-	if err == nil {
-		t.Error("expected error for audit with no action")
-	}
+	assert.NotNil(t, err)
+
 }
 
 // captureStdout redirects stdout to a temp file and returns the captured output.
@@ -43,9 +41,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
 	f, err := os.CreateTemp(t.TempDir(), "stdout")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	os.Stdout = f
 	fn()
 	os.Stdout = old
@@ -60,15 +57,10 @@ func TestServeSysinfo(t *testing.T) {
 	})
 
 	var info protocol.SystemInfo
-	if err := json.Unmarshal([]byte(output), &info); err != nil {
-		t.Fatalf("invalid JSON output: %v\noutput: %s", err, output)
-	}
-	if info.Hostname == "" {
-		t.Error("hostname should not be empty")
-	}
-	if info.CPU.Threads <= 0 {
-		t.Error("cpu threads should be > 0")
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &info))
+	assert.NotEqual(t, "", info.Hostname)
+	assert.Greater(t, info.CPU.Threads, 0)
+
 }
 
 func TestServePs(t *testing.T) {
@@ -77,12 +69,9 @@ func TestServePs(t *testing.T) {
 	})
 
 	var list protocol.ProcessList
-	if err := json.Unmarshal([]byte(output), &list); err != nil {
-		t.Fatalf("invalid JSON output: %v\noutput: %s", err, output)
-	}
-	if len(list.Processes) == 0 {
-		t.Error("expected at least one process")
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &list))
+	assert.NotEqual(t, 0, len(list.Processes))
+
 }
 
 func TestServePsWithFilter(t *testing.T) {
@@ -91,12 +80,9 @@ func TestServePsWithFilter(t *testing.T) {
 	})
 
 	var list protocol.ProcessList
-	if err := json.Unmarshal([]byte(output), &list); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if len(list.Processes) != 0 {
-		t.Error("expected 0 processes with impossible filter")
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &list))
+	assert.Equal(t, 0, len(list.Processes))
+
 }
 
 func TestServeEdit(t *testing.T) {
@@ -109,17 +95,12 @@ func TestServeEdit(t *testing.T) {
 	})
 
 	var result protocol.EditResult
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if !result.Modified {
-		t.Error("should be modified")
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	assert.True(t, result.Modified)
 
 	data, _ := os.ReadFile(path)
-	if string(data) != "goodbye world" {
-		t.Errorf("content = %q", string(data))
-	}
+	assert.Equal(t, "goodbye world", string(data))
+
 }
 
 func TestServeEditNotFound(t *testing.T) {
@@ -132,12 +113,11 @@ func TestServeEditNotFound(t *testing.T) {
 	})
 
 	var result map[string]string
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if _, ok := result["error"]; !ok {
-		t.Error("expected error in output")
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+
+	_, ok := result["error"]
+	assert.True(t, ok)
+
 }
 
 func TestServeAuditStartup(t *testing.T) {
@@ -146,12 +126,9 @@ func TestServeAuditStartup(t *testing.T) {
 	})
 
 	var result map[string]string
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if result["status"] != "logged" {
-		t.Errorf("status = %q, want 'logged'", result["status"])
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	assert.Equal(t, "logged", result["status"])
+
 }
 
 func TestServeAuditShutdown(t *testing.T) {
@@ -160,12 +137,9 @@ func TestServeAuditShutdown(t *testing.T) {
 	})
 
 	var result map[string]string
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if result["status"] != "logged" {
-		t.Errorf("status = %q, want 'logged'", result["status"])
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	assert.Equal(t, "logged", result["status"])
+
 }
 
 func TestServeAuditGeneric(t *testing.T) {
@@ -175,9 +149,8 @@ func TestServeAuditGeneric(t *testing.T) {
 
 	var result map[string]string
 	json.Unmarshal([]byte(output), &result)
-	if result["status"] != "logged" {
-		t.Errorf("status = %q, want 'logged'", result["status"])
-	}
+	assert.Equal(t, "logged", result["status"])
+
 }
 
 func TestWriteJSON(t *testing.T) {
@@ -185,12 +158,9 @@ func TestWriteJSON(t *testing.T) {
 		writeJSON(map[string]int{"a": 1})
 	})
 	var result map[string]int
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if result["a"] != 1 {
-		t.Errorf("a = %d, want 1", result["a"])
-	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	assert.Equal(t, 1, result["a"])
+
 }
 
 func TestWriteJSONError(t *testing.T) {
@@ -199,7 +169,6 @@ func TestWriteJSONError(t *testing.T) {
 	})
 	var result map[string]string
 	json.Unmarshal([]byte(output), &result)
-	if result["error"] != "test error" {
-		t.Errorf("error = %q, want 'test error'", result["error"])
-	}
+	assert.Equal(t, "test error", result["error"])
+
 }

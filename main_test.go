@@ -3,14 +3,15 @@ package main
 import (
 	"os"
 	"testing"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestPrintUsage(t *testing.T) {
 	old := os.Stderr
 	f, err := os.CreateTemp(t.TempDir(), "stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	os.Stderr = f
 	defer func() { os.Stderr = old }()
 
@@ -18,9 +19,8 @@ func TestPrintUsage(t *testing.T) {
 
 	f.Seek(0, 0)
 	data, _ := os.ReadFile(f.Name())
-	if len(data) == 0 {
-		t.Error("printUsage should write to stderr")
-	}
+	assert.NotEqual(t, 0, len(data))
+
 }
 
 func TestRunNoArgs(t *testing.T) {
@@ -30,9 +30,8 @@ func TestRunNoArgs(t *testing.T) {
 	defer func() { os.Stderr = old }()
 
 	err := run(nil)
-	if err == nil {
-		t.Error("expected error with no args")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunUnknownCommand(t *testing.T) {
@@ -42,9 +41,8 @@ func TestRunUnknownCommand(t *testing.T) {
 	defer func() { os.Stderr = old }()
 
 	err := run([]string{"nonexistent"})
-	if err == nil {
-		t.Error("expected error for unknown command")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunExecNoSocket(t *testing.T) {
@@ -52,97 +50,84 @@ func TestRunExecNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 
 	err := run([]string{"exec", "ls"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunDisconnectNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"disconnect"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunReadNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"read", "/some/file"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunPingNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"ping"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunSysinfoNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"sysinfo"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunServeNoAction(t *testing.T) {
 	err := run([]string{"serve"})
-	if err == nil {
-		t.Error("expected error with no serve action")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunUploadNoArgs(t *testing.T) {
 	err := run([]string{"upload"})
-	if err == nil {
-		t.Error("expected error with no upload args")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunDownloadNoArgs(t *testing.T) {
 	err := run([]string{"download"})
-	if err == nil {
-		t.Error("expected error with no download args")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunLsNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"ls"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunPsNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	err := run([]string{"ps"})
-	if err == nil {
-		t.Error("expected error (no daemon)")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunEditNoArgs(t *testing.T) {
 	err := run([]string{"edit"})
-	if err == nil {
-		t.Error("expected error with no edit args")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunConnectNoTarget(t *testing.T) {
 	err := run([]string{"connect"})
-	if err == nil {
-		t.Error("expected error with no target")
-	}
+	assert.NotNil(t, err)
+
 }
 
 func TestRunWriteNoArgs(t *testing.T) {
 	err := run([]string{"write"})
-	if err == nil {
-		t.Error("expected error with no write args")
-	}
+	assert.NotNil(t, err)
+
 }
