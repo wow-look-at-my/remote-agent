@@ -1,0 +1,6 @@
+remote-agent
+remote-agent-linux-amd64
+remote-agent-darwin-arm64
+dist/
+*.out
+*.test
