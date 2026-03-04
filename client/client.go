@@ -268,6 +268,7 @@ func Connect(target string, port int) error {
 	return daemon.Start(target, port)
 }
 
+
 // Disconnect stops the daemon.
 func Disconnect() error {
 	resp, err := sendRequest(&protocol.DaemonRequest{Action: "disconnect"})
