@@ -449,3 +449,236 @@ func TestPrintResponseTextPing(t *testing.T) {
 	}, "ping")
 	assert.Nil(t, err)
 }
+
+func TestPrintResponseTextPingFail(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"pong": false},
+	}, "ping")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextPs(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK: true,
+		Data: map[string]interface{}{
+			"processes": []interface{}{
+				map[string]interface{}{
+					"pid": float64(1), "ppid": float64(0), "user": "root",
+					"state": "S", "rss_bytes": float64(4096), "command": "init",
+				},
+				map[string]interface{}{
+					"pid": float64(100), "ppid": float64(1), "user": "user",
+					"state": "R", "rss_bytes": float64(8192), "command": "bash",
+				},
+			},
+		},
+	}, "ps")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextPsEmpty(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{},
+	}, "ps")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextSysinfo(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK: true,
+		Data: map[string]interface{}{
+			"hostname": "testhost",
+			"os":       "Linux",
+			"arch":     "amd64",
+			"uptime":   "5d 3h",
+			"cpu": map[string]interface{}{
+				"model": "Intel", "cores": float64(4), "threads": float64(8), "mhz": float64(2400),
+			},
+			"memory": map[string]interface{}{
+				"total_bytes": float64(16e9), "available_bytes": float64(8e9),
+			},
+			"disk": []interface{}{
+				map[string]interface{}{
+					"mount_point": "/", "total_bytes": float64(500e9), "use_pct": float64(42),
+				},
+			},
+		},
+	}, "sysinfo")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextExecNonZero(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK: true,
+		Data: map[string]interface{}{
+			"stdout": "", "stderr": "command not found\n", "exit_code": float64(127),
+		},
+	}, "exec")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextWrite(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"bytes_written": float64(1024)},
+	}, "write")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextEdit(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"modified": true, "message": "replaced 3 occurrences"},
+	}, "edit")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextEditNotModified(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"modified": false},
+	}, "edit")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextDisconnect(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"status": "disconnecting"},
+	}, "disconnect")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextReadlink(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"path": "/usr/bin/python", "target": "/usr/bin/python3.11"},
+	}, "readlink")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextUnknownAction(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"key": "value"},
+	}, "unknown")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextNonMap(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: "plain string",
+	}, "exec")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextLsWithSymlink(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK: true,
+		Data: map[string]interface{}{
+			"path": "/tmp",
+			"entries": []interface{}{
+				map[string]interface{}{
+					"name": "/tmp/link", "size": float64(12), "mode": "777",
+					"is_dir": false, "is_link": true, "target": "/tmp/real",
+				},
+			},
+		},
+	}, "ls")
+	assert.Nil(t, err)
+}
+
+func TestPrintResponseTextRead(t *testing.T) {
+	old := os.Stdout
+	f, _ := os.CreateTemp(t.TempDir(), "stdout")
+	os.Stdout = f
+	defer func() { os.Stdout = old }()
+
+	OutputJSON = false
+	err := printResponse(&protocol.DaemonResponse{
+		OK:   true,
+		Data: map[string]interface{}{"content": "file content here", "size": float64(17)},
+	}, "read")
+	assert.Nil(t, err)
+}
