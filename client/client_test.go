@@ -682,3 +682,65 @@ func TestPrintResponseTextRead(t *testing.T) {
 	}, "read")
 	assert.Nil(t, err)
 }
+
+// No-socket tests exercise the sendRequest error branch in each function.
+
+func TestDisconnectNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Disconnect())
+}
+
+func TestExecNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Exec("ls"))
+}
+
+func TestUploadNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Upload("/tmp", "/remote"))
+}
+
+func TestDownloadNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Download("/remote", "/local"))
+}
+
+func TestReadNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Read("/path"))
+}
+
+func TestWriteNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Write("/path", "0644", []byte("x")))
+}
+
+func TestEditNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Edit("/path", "a", "b"))
+}
+
+func TestLsNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Ls("/path", false))
+}
+
+func TestPsNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Ps(""))
+}
+
+func TestSysinfoNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Sysinfo())
+}
+
+func TestPingNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Ping())
+}
+
+func TestReadlinkNoSocket(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	assert.NotNil(t, Readlink("/path"))
+}
