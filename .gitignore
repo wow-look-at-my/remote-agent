@@ -4,3 +4,4 @@ remote-agent-darwin-arm64
 dist/
 *.out
 *.test
+/build/
