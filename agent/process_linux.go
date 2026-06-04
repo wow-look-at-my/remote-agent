@@ -108,7 +108,7 @@ func parseStat(info *protocol.ProcessInfo, data string) {
 	// RSS is field 23 in stat (index 21 in rest, since rest starts after comm)
 	// Actually rest[21] is rss in pages
 	rssPages, _ := strconv.ParseInt(rest[21], 10, 64)
-	info.RSS = rssPages * 4096 // page size is typically 4096
+	info.RSS = rssPages * int64(os.Getpagesize())
 }
 
 func parseStatus(info *protocol.ProcessInfo, data string) {

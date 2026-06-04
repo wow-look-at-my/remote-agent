@@ -2,14 +2,15 @@ name: Build
 
 on:
   push:
-  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: wow-look-at-my/go-toolchain@v1
-        with:
-          verbose: true

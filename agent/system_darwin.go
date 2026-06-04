@@ -3,7 +3,6 @@ package agent
 import (
 	"fmt"
 	"os/exec"
-
 	"strconv"
 	"strings"
 	"syscall"
@@ -115,15 +114,15 @@ func readMemoryInfo() protocol.MemoryInfo {
 			}
 			continue
 		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		key, rawVal, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
-		val := strings.TrimSpace(parts[1])
+		val := strings.TrimSpace(rawVal)
 		val = strings.TrimSuffix(val, ".")
 		n, _ := strconv.ParseInt(val, 10, 64)
 
-		switch strings.TrimSpace(parts[0]) {
+		switch strings.TrimSpace(key) {
 		case "Pages free":
 			freePages = n
 		case "Pages active":
@@ -151,7 +150,7 @@ func readDiskInfo() []protocol.DiskInfo {
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for i, line := range lines {
-		if i == 0 {	// skip header
+		if i == 0 { // skip header
 			continue
 		}
 		fields := strings.Fields(line)
@@ -186,13 +185,13 @@ func readDiskInfo() []protocol.DiskInfo {
 		}
 
 		disks = append(disks, protocol.DiskInfo{
-			Device:		device,
-			MountPoint:	mountPoint,
-			FSType:		fsType,
-			TotalBytes:	total,
-			UsedBytes:	used,
-			AvailBytes:	avail,
-			UsePct:		usePct,
+			Device:     device,
+			MountPoint: mountPoint,
+			FSType:     fsType,
+			TotalBytes: total,
+			UsedBytes:  used,
+			AvailBytes: avail,
+			UsePct:     usePct,
 		})
 	}
 	return disks

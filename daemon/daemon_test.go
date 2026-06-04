@@ -35,9 +35,9 @@ func TestSocketAndPIDPathDiffer(t *testing.T) {
 
 func TestParseTarget(t *testing.T) {
 	tests := []struct {
-		input		string
-		wantUser	string
-		wantHost	string
+		input    string
+		wantUser string
+		wantHost string
 	}{
 		{"admin@server.com", "admin", "server.com"},
 		{"root@10.0.0.1", "root", "10.0.0.1"},
@@ -62,8 +62,8 @@ func TestParseTargetNoUser(t *testing.T) {
 
 func TestShellEscape(t *testing.T) {
 	tests := []struct {
-		input	string
-		want	string
+		input string
+		want  string
 	}{
 		{"simple", "'simple'"},
 		{"with spaces", "'with spaces'"},
@@ -97,9 +97,9 @@ func TestCleanup(t *testing.T) {
 	require.Nil(t, err)
 
 	d := &Daemon{
-		listener:	l,
-		sockPath:	sockPath,
-		pidPath:	pidPath,
+		listener: l,
+		sockPath: sockPath,
+		pidPath:  pidPath,
 	}
 	d.cleanup()
 
@@ -114,8 +114,8 @@ func TestCleanup(t *testing.T) {
 func TestCleanupNilListener(t *testing.T) {
 	dir := t.TempDir()
 	d := &Daemon{
-		sockPath:	filepath.Join(dir, "nonexistent.sock"),
-		pidPath:	filepath.Join(dir, "nonexistent.pid"),
+		sockPath: filepath.Join(dir, "nonexistent.sock"),
+		pidPath:  filepath.Join(dir, "nonexistent.pid"),
 	}
 	// Should not panic
 	d.cleanup()
@@ -124,23 +124,23 @@ func TestCleanupNilListener(t *testing.T) {
 func TestShutdownWithRunner(t *testing.T) {
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:		mock,
-		remotePath:	"/tmp/.remote-agent-test",
-		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
 	}
 	d.shutdown()
 	assert.
 
-	// Verify audit and cleanup commands were run
-	GreaterOrEqual(t, len(mock.calls), 2)
+		// Verify audit and cleanup commands were run
+		GreaterOrEqual(t, len(mock.calls), 2)
 
 }
 
 func TestShutdownNilRunner(t *testing.T) {
 	d := &Daemon{
-		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
+		sockPath: filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:  filepath.Join(t.TempDir(), "test.pid"),
 	}
 	// Should not panic
 	d.shutdown()
@@ -151,8 +151,8 @@ func TestHandleClient(t *testing.T) {
 	mock.onCommand("echo pong", []byte("pong\n"), 0)
 
 	d := &Daemon{
-		runner:		mock,
-		remotePath:	"/tmp/.remote-agent-test",
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
 	}
 
 	// Create a pair of connected sockets
@@ -172,8 +172,8 @@ func TestHandleClient(t *testing.T) {
 
 func TestHandleClientInvalidJSON(t *testing.T) {
 	d := &Daemon{
-		runner:		newMockRunner(),
-		remotePath:	"/tmp/.remote-agent-test",
+		runner:     newMockRunner(),
+		remotePath: "/tmp/.remote-agent-test",
 	}
 
 	server, client := net.Pipe()

@@ -1,1 +1,102 @@
+# remote-agent
 
+`remote-agent` is a single Go binary that exposes a small, structured toolset for
+operating on a **remote host over SSH** — run commands, read/write/edit files, list
+directories and processes, and gather system info — with optional JSON output.
+
+It runs a local **daemon** that holds one SSH connection and deploys a copy of
+itself to the remote to service operations that need structured output there.
+
+## Build
+
+Use the [`go-toolchain`](https://github.com/wow-look-at-my/go-toolchain) wrapper
+(recommended), or a recent Go toolchain via the `Makefile`:
+
+```sh
+go-toolchain          # tidy + vet + test + build -> build/remote-agent
+# or, with plain Go:
+make build            # -> ./remote-agent
+make build-linux      # -> ./remote-agent-linux-amd64  (for deploying to Linux remotes)
+make build-all        # -> dist/ (linux/amd64 + darwin/arm64)
+```
+
+The daemon deploys a **linux/amd64** helper to the remote, so build that variant
+(`make build-linux` or `make build-all`) and keep it next to the binary — unless the
+local binary is itself linux/amd64, in which case it deploys itself.
+
+## Usage
+
+```sh
+# 1. Connect — starts a background daemon that holds the SSH connection
+remote-agent connect user@host           # --port N for a non-standard SSH port
+
+# 2. Operate on the remote
+remote-agent ping
+remote-agent exec "uname -a"
+remote-agent ls /var/log --recursive
+remote-agent read /etc/hostname
+echo "hi" | remote-agent write /tmp/greeting --mode 0644
+remote-agent edit /tmp/greeting --old hi --new hello
+remote-agent ps --filter nginx
+remote-agent sysinfo
+remote-agent upload ./local.txt /tmp/remote.txt
+remote-agent download /tmp/remote.txt ./local.txt
+remote-agent readlink /usr/bin/python
+
+# 3. Disconnect — stops the daemon and removes the remote helper
+remote-agent disconnect
+```
+
+Add `--json` to any command for machine-readable output instead of compact text.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
+| `disconnect` | Stop the daemon and remove the remote helper. |
+| `ping` | Check that the daemon and remote are alive. |
+| `exec <command...>` | Run a shell command on the remote. |
+| `ls [path]` | List a remote directory. `--recursive` walks subdirectories. |
+| `read <path>` | Print a remote file (binary-safe). |
+| `write <path>` | Write stdin to a remote file. `--mode` sets permissions (default 0644). |
+| `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`. |
+| `ps` | List remote processes. `--filter` matches by name. |
+| `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
+| `upload <local> <remote>` | Copy a local file to the remote. |
+| `download <remote> <local>` | Copy a remote file to the local host. |
+| `readlink <path>` | Resolve a symlink target on the remote. |
+
+## How it works
+
+```
+ remote-agent ls /tmp        ┌─ local daemon ──┐         ┌─ remote host ──┐
+ (CLI client) ─JSON/unix──▶  │ handler → ops   │ ──SSH──▶ │ shell / serve  │
+              ◀─JSON resp──   │ (one SSH conn)  │ ◀──────  │   subcommands  │
+                             └─────────────────┘         └────────────────┘
+```
+
+- The **client** sends a JSON request over a per-target Unix socket.
+- The **daemon** (`remote-agent connect`) keeps a single SSH connection open and
+  runs each request, serializing access behind a mutex. File transfers are
+  base64-framed for binary safety.
+- A copy of the binary is **deployed to the remote** and invoked as a hidden
+  `serve` subcommand for operations that need structured output there (`sysinfo`,
+  `ps`, `edit`), with start/stop/action **audit logging** to the remote's syslog.
+
+Authentication uses your SSH agent and `~/.ssh` keys. The host-key fingerprint is
+printed on connect; when there is no `known_hosts` entry, the first connection is
+trust-on-first-use, so verify the printed fingerprint.
+
+There is **one daemon per target host** (the socket path is derived from the
+target), so multiple terminals targeting the same host share a connection.
+
+## Development
+
+```sh
+go-toolchain          # tidy + vet + test (with coverage) + build
+gofmt -l .            # must print nothing
+```
+
+See [`CLAUDE.md`](./CLAUDE.md) for the architecture map and conventions. CI runs the
+same `go-toolchain` on every push.

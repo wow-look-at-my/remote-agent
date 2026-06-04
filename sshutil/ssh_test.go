@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSafeBuffer(t *testing.T) {
 	var buf safeBuffer
 	assert.
 
-	// Empty buffer
-	Equal(t, 0, len(buf.Bytes()))
+		// Empty buffer
+		Equal(t, 0, len(buf.Bytes()))
 
 	// Write some data
 	n, err := buf.Write([]byte("hello"))
@@ -32,8 +32,8 @@ func TestSafeBuffer(t *testing.T) {
 	n, err = buf.Write([]byte(" world"))
 	require.Nil(t, err)
 	assert.Equal(t, 6, n)
-	assert.Equal(t,// Check accumulated content
-	"hello world", string(buf.Bytes()))
+	assert.Equal(t, // Check accumulated content
+		"hello world", string(buf.Bytes()))
 
 }
 
@@ -54,10 +54,10 @@ func TestSafeBufferBinaryData(t *testing.T) {
 
 func TestConnResultFields(t *testing.T) {
 	cr := ConnResult{
-		Fingerprint:	"SHA256:test",
-		User:		"admin",
-		Host:		"example.com",
-		Port:		22,
+		Fingerprint: "SHA256:test",
+		User:        "admin",
+		Host:        "example.com",
+		Port:        22,
 	}
 	assert.Equal(t, "SHA256:test", cr.Fingerprint)
 	assert.Equal(t, "admin", cr.User)
@@ -256,8 +256,8 @@ func TestRunCommandWithStdinEmpty(t *testing.T) {
 func dialTestServer(t *testing.T, addr string) *ssh.Client {
 	t.Helper()
 	config := &ssh.ClientConfig{
-		User:			"test",
-		HostKeyCallback:	ssh.InsecureIgnoreHostKey(),
+		User:            "test",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := ssh.Dial("tcp", addr, config)
 	require.Nil(t, err)
@@ -274,7 +274,7 @@ func TestBuildAuthMethodsWithKeyFile(t *testing.T) {
 	writeTestKey(t, filepath.Join(sshDir, "id_ed25519"))
 
 	t.Setenv("HOME", home)
-	t.Setenv("SSH_AUTH_SOCK", "")	// disable agent
+	t.Setenv("SSH_AUTH_SOCK", "") // disable agent
 
 	methods, fingerprint, err := buildAuthMethods()
 	require.Nil(t, err)

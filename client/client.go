@@ -74,7 +74,7 @@ func printResponse(resp *protocol.DaemonResponse, action string) error {
 
 // printTextResponse formats the response data as compact text based on the action type.
 func printTextResponse(data any, action string) error {
-	m, _ := data.(map[string]interface{})
+	m, _ := data.(map[string]any)
 	if m == nil {
 		fmt.Fprintln(os.Stdout, data)
 		return nil
@@ -109,7 +109,7 @@ func printTextResponse(data any, action string) error {
 	}
 }
 
-func printExecText(m map[string]interface{}) error {
+func printExecText(m map[string]any) error {
 	stdout, _ := m["stdout"].(string)
 	stderr, _ := m["stderr"].(string)
 	exitCode, _ := m["exit_code"].(float64)
@@ -126,19 +126,19 @@ func printExecText(m map[string]interface{}) error {
 	return nil
 }
 
-func printReadText(m map[string]interface{}) error {
+func printReadText(m map[string]any) error {
 	content, _ := m["content"].(string)
 	fmt.Fprint(os.Stdout, content)
 	return nil
 }
 
-func printWriteText(m map[string]interface{}) error {
+func printWriteText(m map[string]any) error {
 	bytes, _ := m["bytes_written"].(float64)
 	fmt.Fprintf(os.Stdout, "%d bytes written\n", int64(bytes))
 	return nil
 }
 
-func printEditText(m map[string]interface{}) error {
+func printEditText(m map[string]any) error {
 	modified, _ := m["modified"].(bool)
 	msg, _ := m["message"].(string)
 	if modified {
@@ -153,14 +153,14 @@ func printEditText(m map[string]interface{}) error {
 	return nil
 }
 
-func printLsText(m map[string]interface{}) error {
-	entries, _ := m["entries"].([]interface{})
+func printLsText(m map[string]any) error {
+	entries, _ := m["entries"].([]any)
 	if entries == nil {
 		return nil
 	}
 
 	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
+		entry, ok := e.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -187,21 +187,21 @@ func printLsText(m map[string]interface{}) error {
 	return nil
 }
 
-func printReadlinkText(m map[string]interface{}) error {
+func printReadlinkText(m map[string]any) error {
 	target, _ := m["target"].(string)
 	fmt.Fprintln(os.Stdout, target)
 	return nil
 }
 
-func printPsText(m map[string]interface{}) error {
-	processes, _ := m["processes"].([]interface{})
+func printPsText(m map[string]any) error {
+	processes, _ := m["processes"].([]any)
 	if processes == nil {
 		return nil
 	}
 
 	fmt.Fprintf(os.Stdout, "PID\tUSER\tSTATE\tRSS\tCOMMAND\n")
 	for _, p := range processes {
-		proc, ok := p.(map[string]interface{})
+		proc, ok := p.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -215,7 +215,7 @@ func printPsText(m map[string]interface{}) error {
 	return nil
 }
 
-func printSysinfoText(m map[string]interface{}) error {
+func printSysinfoText(m map[string]any) error {
 	hostname, _ := m["hostname"].(string)
 	osName, _ := m["os"].(string)
 	arch, _ := m["arch"].(string)
@@ -223,7 +223,7 @@ func printSysinfoText(m map[string]interface{}) error {
 
 	fmt.Fprintf(os.Stdout, "%s %s %s up %s\n", hostname, osName, arch, uptime)
 
-	if cpu, ok := m["cpu"].(map[string]interface{}); ok {
+	if cpu, ok := m["cpu"].(map[string]any); ok {
 		model, _ := cpu["model"].(string)
 		cores, _ := cpu["cores"].(float64)
 		threads, _ := cpu["threads"].(float64)
@@ -231,15 +231,15 @@ func printSysinfoText(m map[string]interface{}) error {
 		fmt.Fprintf(os.Stdout, "cpu: %s %dc/%dt %.0fMHz\n", model, int(cores), int(threads), mhz)
 	}
 
-	if mem, ok := m["memory"].(map[string]interface{}); ok {
+	if mem, ok := m["memory"].(map[string]any); ok {
 		total, _ := mem["total_bytes"].(float64)
 		avail, _ := mem["available_bytes"].(float64)
 		fmt.Fprintf(os.Stdout, "mem: %.1fG total %.1fG avail\n", total/1e9, avail/1e9)
 	}
 
-	if disks, ok := m["disk"].([]interface{}); ok {
+	if disks, ok := m["disk"].([]any); ok {
 		for _, d := range disks {
-			disk, ok := d.(map[string]interface{})
+			disk, ok := d.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -253,7 +253,7 @@ func printSysinfoText(m map[string]interface{}) error {
 	return nil
 }
 
-func printPingText(m map[string]interface{}) error {
+func printPingText(m map[string]any) error {
 	pong, _ := m["pong"].(bool)
 	if pong {
 		fmt.Fprintln(os.Stdout, "pong")
@@ -267,7 +267,6 @@ func printPingText(m map[string]interface{}) error {
 func Connect(target string, port int) error {
 	return daemon.Start(target, port)
 }
-
 
 // Disconnect stops the daemon.
 func Disconnect() error {
@@ -291,7 +290,7 @@ func Exec(command string) error {
 	// so the response could be either an ExecResult or a DirListing.
 	// Detect by checking for "entries" key (ls) vs "stdout" key (exec).
 	if resp.OK {
-		if m, ok := resp.Data.(map[string]interface{}); ok {
+		if m, ok := resp.Data.(map[string]any); ok {
 			if _, hasEntries := m["entries"]; hasEntries {
 				return printResponse(resp, "ls")
 			}

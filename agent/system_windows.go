@@ -43,12 +43,12 @@ func readMemoryInfo() protocol.MemoryInfo {
 
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		key, rawVal, found := strings.Cut(line, "=")
+		if !found {
 			continue
 		}
-		val, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-		switch strings.TrimSpace(parts[0]) {
+		val, _ := strconv.ParseInt(strings.TrimSpace(rawVal), 10, 64)
+		switch strings.TrimSpace(key) {
 		case "TotalVisibleMemorySize":
 			info.TotalBytes = val * 1024
 		case "FreePhysicalMemory":
@@ -83,12 +83,12 @@ func readDiskInfo() []protocol.DiskInfo {
 			current = protocol.DiskInfo{}
 			continue
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		rawKey, rawVal, found := strings.Cut(line, "=")
+		if !found {
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
+		key := strings.TrimSpace(rawKey)
+		val := strings.TrimSpace(rawVal)
 		switch key {
 		case "DeviceID":
 			current.Device = val
