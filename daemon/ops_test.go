@@ -12,30 +12,30 @@ import (
 
 // mockRunner records commands and returns configured responses.
 type mockRunner struct {
-	calls		[]mockCall
-	responses	map[string]mockResponse
+	calls     []mockCall
+	responses map[string]mockResponse
 	// fallback response for unmatched commands
-	defaultResponse	mockResponse
+	defaultResponse mockResponse
 }
 
 type mockCall struct {
-	Command	string
-	Stdin	[]byte
+	Command string
+	Stdin   []byte
 }
 
 type mockResponse struct {
-	stdout		[]byte
-	stderr		[]byte
-	exitCode	int
-	err		error
+	stdout   []byte
+	stderr   []byte
+	exitCode int
+	err      error
 }
 
 func newMockRunner() *mockRunner {
 	return &mockRunner{
-		responses:	make(map[string]mockResponse),
+		responses: make(map[string]mockResponse),
 		defaultResponse: mockResponse{
-			stdout:		[]byte(""),
-			exitCode:	0,
+			stdout:   []byte(""),
+			exitCode: 0,
 		},
 	}
 }
@@ -71,8 +71,8 @@ func (m *mockRunner) onCommandFail(cmd string, err error) {
 func newTestHandler() (*Handler, *mockRunner) {
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:		mock,
-		remotePath:	"/tmp/.remote-agent-test",
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
 	}
 	return &Handler{daemon: d}, mock
 }

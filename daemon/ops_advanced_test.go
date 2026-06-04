@@ -93,7 +93,7 @@ func TestHandlePsWithFilter(t *testing.T) {
 func TestHandleSysinfo(t *testing.T) {
 	h, mock := newTestHandler()
 	result, _ := json.Marshal(protocol.SystemInfo{
-		Hostname:	"test", OS: "Ubuntu", Arch: "amd64",
+		Hostname: "test", OS: "Ubuntu", Arch: "amd64",
 	})
 	mock.defaultResponse = mockResponse{stdout: result, exitCode: 0}
 
@@ -143,8 +143,8 @@ func TestParseLsOutputMalformed(t *testing.T) {
 
 func TestParseInt64(t *testing.T) {
 	tests := []struct {
-		input	string
-		want	int64
+		input string
+		want  int64
 	}{
 		{"0", 0},
 		{"42", 42},
@@ -170,10 +170,10 @@ func TestHandleDisconnect(t *testing.T) {
 
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:		mock,
-		remotePath:	"/tmp/.remote-agent-test",
-		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
 	}
 	h := &Handler{daemon: d}
 
@@ -240,8 +240,8 @@ func TestHandleDownloadWriteLocalFail(t *testing.T) {
 
 	// Try to write to a directory that doesn't exist
 	resp := h.handleDownload(map[string]any{
-		"remote_path":	"/tmp/remote",
-		"local_path":	"/nonexistent/dir/file.txt",
+		"remote_path": "/tmp/remote",
+		"local_path":  "/nonexistent/dir/file.txt",
 	})
 	assert.False(t, resp.OK)
 
@@ -367,12 +367,12 @@ func TestParseLsCommand(t *testing.T) {
 		{"ls /tmp", "/tmp", false, true},
 		{"ls -R /tmp", "/tmp", true, true},
 		{"ls -R", ".", true, true},
-		{"ls -la", "", false, false},        // unsupported flags
-		{"ls -la /tmp", "", false, false},   // unsupported flags
+		{"ls -la", "", false, false},      // unsupported flags
+		{"ls -la /tmp", "", false, false}, // unsupported flags
 		{"ls --color /tmp", "", false, false},
 		{"cat /etc/passwd", "", false, false}, // not ls
 		{"", "", false, false},
-		{"lsof", "", false, false},           // not ls
+		{"lsof", "", false, false}, // not ls
 	}
 	for _, tt := range tests {
 		path, recursive, ok := parseLsCommand(tt.cmd)

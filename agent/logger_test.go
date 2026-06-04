@@ -2,8 +2,8 @@ package agent
 
 import (
 	"fmt"
-	"testing"
 	"github.com/wow-look-at-my/testify/require"
+	"testing"
 )
 
 func TestNewLogger(t *testing.T) {

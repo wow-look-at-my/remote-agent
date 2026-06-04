@@ -69,12 +69,12 @@ func readCPUInfo() protocol.CPUInfo {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		key, rawVal, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
+		key = strings.TrimSpace(key)
+		val := strings.TrimSpace(rawVal)
 
 		switch key {
 		case "model name":
@@ -106,18 +106,17 @@ func readMemoryInfo() protocol.MemoryInfo {
 	}
 	defer f.Close()
 
+	var swapFree int64
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		key, rawVal, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		valKB := parseKBValue(val)
+		valKB := parseKBValue(strings.TrimSpace(rawVal))
 
-		switch key {
+		switch strings.TrimSpace(key) {
 		case "MemTotal":
 			info.TotalBytes = valKB * 1024
 		case "MemAvailable":
@@ -125,11 +124,11 @@ func readMemoryInfo() protocol.MemoryInfo {
 		case "SwapTotal":
 			info.SwapTotalBytes = valKB * 1024
 		case "SwapFree":
-			info.SwapUsedBytes = valKB * 1024 // temporarily store SwapFree
+			swapFree = valKB * 1024
 		}
 	}
 	info.UsedBytes = info.TotalBytes - info.AvailableBytes
-	info.SwapUsedBytes = info.SwapTotalBytes - info.SwapUsedBytes // SwapTotal - SwapFree
+	info.SwapUsedBytes = info.SwapTotalBytes - swapFree
 	return info
 }
 

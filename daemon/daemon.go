@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"os/signal"
@@ -228,16 +228,10 @@ func findDeployBinary() (string, error) {
 }
 
 func parseTarget(target string) (user, host string, err error) {
-	parts := strings.SplitN(target, "@", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1], nil
+	if user, host, found := strings.Cut(target, "@"); found {
+		return user, host, nil
 	}
-	// No user specified, use current user
-	u, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", fmt.Errorf("determine current user: %w", err)
-	}
-	_ = u
+	// No user specified — fall back to $USER, then root.
 	currentUser := os.Getenv("USER")
 	if currentUser == "" {
 		currentUser = "root"
@@ -253,7 +247,7 @@ func randomSuffix() string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 8)
 	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+		b[i] = chars[rand.IntN(len(chars))]
 	}
 	return string(b)
 }

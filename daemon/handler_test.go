@@ -51,8 +51,8 @@ func TestHandleDispatchExec(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"exec",
-		Params:	map[string]any{"command": "ls"},
+		Action: "exec",
+		Params: map[string]any{"command": "ls"},
 	})
 	assert.True(t, resp.OK)
 
@@ -65,8 +65,8 @@ func TestHandleDispatchRead(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"read",
-		Params:	map[string]any{"path": "/etc/hostname"},
+		Action: "read",
+		Params: map[string]any{"path": "/etc/hostname"},
 	})
 	assert.True(t, resp.OK)
 
@@ -77,8 +77,8 @@ func TestHandleDispatchWrite(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"write",
-		Params:	map[string]any{"path": "/tmp/test", "content": "hello"},
+		Action: "write",
+		Params: map[string]any{"path": "/tmp/test", "content": "hello"},
 	})
 	assert.True(t, resp.OK)
 
@@ -93,8 +93,8 @@ func TestHandleDispatchUpload(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"upload",
-		Params:	map[string]any{"local_path": localFile, "remote_path": "/tmp/remote"},
+		Action: "upload",
+		Params: map[string]any{"local_path": localFile, "remote_path": "/tmp/remote"},
 	})
 	assert.True(t, resp.OK)
 
@@ -109,8 +109,8 @@ func TestHandleDispatchDownload(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"download",
-		Params:	map[string]any{"remote_path": "/tmp/remote", "local_path": localPath},
+		Action: "download",
+		Params: map[string]any{"remote_path": "/tmp/remote", "local_path": localPath},
 	})
 	assert.True(t, resp.OK)
 
@@ -124,8 +124,8 @@ func TestHandleDispatchEdit(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"edit",
-		Params:	map[string]any{"path": "/tmp/f", "old": "a", "new": "b"},
+		Action: "edit",
+		Params: map[string]any{"path": "/tmp/f", "old": "a", "new": "b"},
 	})
 	assert.True(t, resp.OK)
 
@@ -137,8 +137,8 @@ func TestHandleDispatchLs(t *testing.T) {
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{
-		Action:	"ls",
-		Params:	map[string]any{"path": "/tmp"},
+		Action: "ls",
+		Params: map[string]any{"path": "/tmp"},
 	})
 	assert.True(t, resp.OK)
 
@@ -176,10 +176,10 @@ func TestHandleDispatchDisconnect(t *testing.T) {
 
 	mock := newMockRunner()
 	d := &Daemon{
-		runner:		mock,
-		remotePath:	"/tmp/.remote-agent-test",
-		sockPath:	filepath.Join(t.TempDir(), "test.sock"),
-		pidPath:	filepath.Join(t.TempDir(), "test.pid"),
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
 	}
 	h := &Handler{daemon: d}
 

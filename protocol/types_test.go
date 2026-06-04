@@ -2,15 +2,15 @@ package protocol
 
 import (
 	"encoding/json"
-	"testing"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
+	"testing"
 )
 
 func TestDaemonRequestJSON(t *testing.T) {
 	req := DaemonRequest{
-		Action:	"exec",
-		Params:	map[string]any{"command": "ls -la"},
+		Action: "exec",
+		Params: map[string]any{"command": "ls -la"},
 	}
 	data, err := json.Marshal(req)
 	require.Nil(t, err)
@@ -26,8 +26,8 @@ func TestDaemonRequestJSON(t *testing.T) {
 
 func TestDaemonResponseJSON(t *testing.T) {
 	resp := DaemonResponse{
-		OK:	true,
-		Data:	ExecResult{Stdout: "hello", Stderr: "", ExitCode: 0},
+		OK:   true,
+		Data: ExecResult{Stdout: "hello", Stderr: "", ExitCode: 0},
 	}
 	data, err := json.Marshal(resp)
 	require.Nil(t, err)
@@ -107,7 +107,7 @@ func TestDirEntryJSON(t *testing.T) {
 
 func TestDirListingJSON(t *testing.T) {
 	dl := DirListing{
-		Path:	"/tmp",
+		Path: "/tmp",
 		Entries: []DirEntry{
 			{Name: "a", IsDir: true},
 			{Name: "b.txt", Size: 42},
@@ -135,15 +135,15 @@ func TestProcessInfoJSON(t *testing.T) {
 
 func TestSystemInfoJSON(t *testing.T) {
 	si := SystemInfo{
-		Hostname:	"test",
-		OS:		"Ubuntu 24.04",
-		Arch:		"amd64",
-		Uptime:		"1d 2h",
-		CPU:		CPUInfo{Model: "Intel", Cores: 4, Threads: 8, MHz: 2100},
-		Memory:		MemoryInfo{TotalBytes: 1024 * 1024 * 1024},
-		Disk:		[]DiskInfo{{Device: "/dev/sda1", MountPoint: "/", TotalBytes: 100 * 1024 * 1024 * 1024}},
-		Network:	[]NetworkInterface{{Name: "eth0", State: "up", IPv4: []string{"10.0.0.1/24"}}},
-		GPU:		[]GPUInfo{},
+		Hostname: "test",
+		OS:       "Ubuntu 24.04",
+		Arch:     "amd64",
+		Uptime:   "1d 2h",
+		CPU:      CPUInfo{Model: "Intel", Cores: 4, Threads: 8, MHz: 2100},
+		Memory:   MemoryInfo{TotalBytes: 1024 * 1024 * 1024},
+		Disk:     []DiskInfo{{Device: "/dev/sda1", MountPoint: "/", TotalBytes: 100 * 1024 * 1024 * 1024}},
+		Network:  []NetworkInterface{{Name: "eth0", State: "up", IPv4: []string{"10.0.0.1/24"}}},
+		GPU:      []GPUInfo{},
 	}
 	data, err := json.Marshal(si)
 	require.Nil(t, err)
