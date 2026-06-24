@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
