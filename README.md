@@ -49,11 +49,39 @@ remote-agent disconnect
 
 Add `--json` to any command for machine-readable output instead of compact text.
 
+`exec` mirrors the remote command's **exit code** as its own, and forwards remote
+stdout to stdout and stderr to stderr — so it behaves like a transparent local
+shell command (e.g. `remote-agent exec false` exits 1).
+
+### Run Claude Code against a remote host
+
+`remote-agent claude` launches [Claude Code](https://claude.com/claude-code) with
+its shell wired to run **every Bash command on the remote host** instead of
+locally. It starts (or reuses) a daemon for the target and points Claude's
+`CLAUDE_CODE_SHELL_PREFIX` at a shim that forwards each command through the daemon.
+The model just runs ordinary shell commands — it never has to think about SSH.
+
+```sh
+remote-agent claude user@host                 # start daemon, launch claude wired to it
+remote-agent claude user@host --port 2222     # non-standard SSH port
+remote-agent claude user@host -- --model opus # args after -- are passed to claude
+remote-agent claude                           # reuse the single running daemon
+```
+
+A daemon started by this command is stopped again when claude exits; pass
+`--keep-daemon` to leave it running, or `--claude-bin` to point at a specific
+`claude` executable.
+
+> Note: each Bash call runs as a one-shot command on the remote, so shell state
+> (e.g. `cd`, exported variables) does not persist between calls — use absolute
+> paths or combine steps in a single command (`cd /x && make`).
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
+| `claude [user@host]` | Launch Claude Code with its Bash shell wired to run on the remote. `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
 | `disconnect` | Stop the daemon and remove the remote helper. |
 | `ping` | Check that the daemon and remote are alive. |
 | `exec <command...>` | Run a shell command on the remote. |
@@ -89,7 +117,11 @@ printed on connect; when there is no `known_hosts` entry, the first connection i
 trust-on-first-use, so verify the printed fingerprint.
 
 There is **one daemon per target host** (the socket path is derived from the
-target), so multiple terminals targeting the same host share a connection.
+target), so multiple terminals targeting the same host share a connection. When
+more than one daemon is running, set `REMOTE_AGENT_TARGET=user@host` (or
+`REMOTE_AGENT_SOCKET=/path/to.sock`) to pick which one a command talks to;
+`remote-agent claude` exports this automatically so its forwarded commands always
+reach the right daemon.
 
 ## Development
 

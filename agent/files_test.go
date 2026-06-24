@@ -1,11 +1,13 @@
 package agent
 
 import (
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEditFile(t *testing.T) {
@@ -48,7 +50,7 @@ func TestEditFilePreservesPermissions(t *testing.T) {
 	fi, _ := os.Stat(path)
 	assert.
 		// Compare just the permission bits
-		Equal(t, 0755, fi.Mode().Perm())
+		Equal(t, fs.FileMode(0755), fi.Mode().Perm())
 
 }
 

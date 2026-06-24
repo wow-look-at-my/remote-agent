@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/remote-agent/protocol"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 // startMockDaemon creates a mock daemon that accepts connections and responds with okData.
@@ -124,7 +124,8 @@ func TestExec(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		assert.NoError(t, Exec("ls -la"))
+		_, err := Exec("ls -la")
+		assert.NoError(t, err)
 	})
 }
 
@@ -250,7 +251,7 @@ func startErrorDaemon(t *testing.T) (cleanup func()) {
 func TestExecDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
-	err := Exec("ls")
+	_, err := Exec("ls")
 	assert.NotNil(t, err)
 }
 
@@ -692,7 +693,8 @@ func TestDisconnectNoSocket(t *testing.T) {
 
 func TestExecNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	assert.NotNil(t, Exec("ls"))
+	_, err := Exec("ls")
+	assert.NotNil(t, err)
 }
 
 func TestUploadNoSocket(t *testing.T) {

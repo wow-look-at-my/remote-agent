@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/wow-look-at-my/testify/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 // suppressStdout redirects stdout for the duration of fn to avoid polluting test output.
@@ -40,6 +40,19 @@ func TestExecuteExecNoSocket(t *testing.T) {
 	rootCmd.SetArgs([]string{"exec", "ls"})
 	err := rootCmd.Execute()
 	assert.NotNil(t, err)
+}
+
+func TestExecuteClaudeTooManyArgs(t *testing.T) {
+	rootCmd.SetArgs([]string{"claude", "user@host", "extra"})
+	err := rootCmd.Execute()
+	assert.NotNil(t, err) // second positional is rejected; claude flags go after --
+}
+
+func TestExecuteClaudeNoTargetNoDaemon(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	rootCmd.SetArgs([]string{"claude"})
+	err := rootCmd.Execute()
+	assert.NotNil(t, err) // no target given and no daemon running
 }
 
 func TestExecuteDisconnectNoSocket(t *testing.T) {
