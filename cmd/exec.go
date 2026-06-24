@@ -2,11 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wow-look-at-my/remote-agent/client"
 )
+
+// osExit is a seam so tests can intercept process exit.
+var osExit = os.Exit
 
 var execCmd = &cobra.Command{
 	Use:                "exec command [args...]",
@@ -16,7 +20,16 @@ var execCmd = &cobra.Command{
 		if len(args) == 0 {
 			return fmt.Errorf("usage: remote-agent exec <command>")
 		}
-		return client.Exec(strings.Join(args, " "))
+		code, err := client.Exec(strings.Join(args, " "))
+		if err != nil {
+			return err
+		}
+		// Mirror the remote command's exit code as our own so callers (including
+		// Claude Code's Bash tool) see real success/failure.
+		if code != 0 {
+			osExit(code)
+		}
+		return nil
 	},
 }
 

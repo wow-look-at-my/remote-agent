@@ -10,6 +10,14 @@ Guidance for Claude Code (and other agents) working in this repository.
 local **daemon** that holds one SSH connection, plus a copy of the same binary
 **deployed to the remote** to service operations that need structured output there.
 
+It also ships a `claude` launcher (`remote-agent claude [user@host]`) that runs
+Claude Code with `CLAUDE_CODE_SHELL_PREFIX` pointed at a one-line shim
+(`client/shellprefix.sh`, embedded via `//go:embed`) so every Bash tool command
+Claude issues is forwarded to the remote through the daemon. The shim must be a
+**single-token** program path — Claude's prefix wrapper shell-quotes the program
+name, so a multi-word prefix like `remote-agent exec` would be treated as one
+executable name and fail.
+
 ## Build, test, lint
 
 This is a `wow-look-at-my` Go project: **always use `go-toolchain`** (no arguments)
@@ -67,7 +75,7 @@ remote binary, removes the socket/PID files, and exits.
 | Path | Responsibility |
 |------|----------------|
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
-| `client/` | Unix-socket client and the human-readable printer for each action. |
+| `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim. |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`). |
 | `agent/` | Remote-side system/process/file collectors; platform files selected by build tag. |
 | `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. |
@@ -99,6 +107,16 @@ remote binary, removes the socket/PID files, and exits.
   flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`).
 - Host-key verification is trust-on-first-use when `~/.ssh/known_hosts` is absent
   (`sshutil/ssh.go`); the fingerprint is printed on connect so it can be verified.
+- `client.Exec` returns `(exitCode, err)`: `err` is a transport/daemon failure,
+  while a non-zero remote exit is reported via `exitCode`. `cmd/exec.go` mirrors
+  that code as the process exit code (via the `osExit` test seam), so callers like
+  Claude's Bash tool see real success/failure. `exec` no longer prints an
+  `[exit N]` marker.
+- Socket selection: `findSocket` honors `client.SocketOverride`, then
+  `REMOTE_AGENT_SOCKET`, then `REMOTE_AGENT_TARGET` (hashed via `daemon.SocketPath`),
+  before falling back to globbing a single socket in `TempDir`. The `claude`
+  launcher exports `REMOTE_AGENT_SOCKET` so forwarded commands hit the right daemon
+  even when several are running.
 
 ## Adding a command
 

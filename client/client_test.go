@@ -124,7 +124,8 @@ func TestExec(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		assert.NoError(t, Exec("ls -la"))
+		_, err := Exec("ls -la")
+		assert.NoError(t, err)
 	})
 }
 
@@ -250,7 +251,7 @@ func startErrorDaemon(t *testing.T) (cleanup func()) {
 func TestExecDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
-	err := Exec("ls")
+	_, err := Exec("ls")
 	assert.NotNil(t, err)
 }
 
@@ -692,7 +693,8 @@ func TestDisconnectNoSocket(t *testing.T) {
 
 func TestExecNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	assert.NotNil(t, Exec("ls"))
+	_, err := Exec("ls")
+	assert.NotNil(t, err)
 }
 
 func TestUploadNoSocket(t *testing.T) {

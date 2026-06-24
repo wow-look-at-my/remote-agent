@@ -14,13 +14,22 @@ import (
 // OutputJSON controls whether responses are printed as JSON (true) or compact text (false).
 var OutputJSON bool
 
-// sendRequest connects to the daemon Unix socket, sends a request, and returns the response.
+// SocketOverride, when set, forces all requests to a specific daemon socket path,
+// bypassing socket discovery. Mainly a programmatic seam; the REMOTE_AGENT_SOCKET
+// and REMOTE_AGENT_TARGET environment variables provide the same control.
+var SocketOverride string
+
+// sendRequest locates the daemon socket and sends a request to it.
 func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	sockPath, err := findSocket()
 	if err != nil {
 		return nil, err
 	}
+	return sendRequestTo(sockPath, req)
+}
 
+// sendRequestTo sends a request to a specific daemon Unix socket and returns the response.
+func sendRequestTo(sockPath string, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w (is the daemon running? use 'remote-agent connect' first)", err)
@@ -41,8 +50,20 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 	return &resp, nil
 }
 
-// findSocket looks for a daemon Unix socket.
+// findSocket determines which daemon socket to use. An explicit SocketOverride or
+// the REMOTE_AGENT_SOCKET / REMOTE_AGENT_TARGET environment variables take
+// precedence; otherwise it discovers a single running daemon by globbing TempDir.
 func findSocket() (string, error) {
+	if SocketOverride != "" {
+		return SocketOverride, nil
+	}
+	if s := os.Getenv("REMOTE_AGENT_SOCKET"); s != "" {
+		return s, nil
+	}
+	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
+		return daemon.SocketPath(t), nil
+	}
+
 	pattern := filepath.Join(os.TempDir(), "remote-agent-*.sock")
 	matches, _ := filepath.Glob(pattern)
 
@@ -52,7 +73,7 @@ func findSocket() (string, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple daemons running (%d sockets found); specify --host", len(matches))
+		return "", fmt.Errorf("multiple daemons running (%d sockets found); set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
 	}
 }
 
@@ -112,16 +133,16 @@ func printTextResponse(data any, action string) error {
 func printExecText(m map[string]any) error {
 	stdout, _ := m["stdout"].(string)
 	stderr, _ := m["stderr"].(string)
-	exitCode, _ := m["exit_code"].(float64)
 
+	// Forward stdout to stdout and stderr to stderr unconditionally so the
+	// command behaves like a transparent shell. The remote exit code is
+	// propagated by the caller as this process's own exit code (see cmd/exec.go),
+	// so no "[exit N]" marker is printed.
 	if stdout != "" {
 		fmt.Fprint(os.Stdout, stdout)
 	}
-	if int(exitCode) != 0 {
-		if stderr != "" {
-			fmt.Fprint(os.Stderr, stderr)
-		}
-		fmt.Fprintf(os.Stdout, "[exit %d]\n", int(exitCode))
+	if stderr != "" {
+		fmt.Fprint(os.Stderr, stderr)
 	}
 	return nil
 }
@@ -277,26 +298,34 @@ func Disconnect() error {
 	return printResponse(resp, "disconnect")
 }
 
-// Exec runs a command on the remote.
-func Exec(command string) error {
+// Exec runs a command on the remote and returns the remote command's exit code.
+// A non-nil error indicates a transport/daemon failure (distinct from the remote
+// command exiting non-zero, which is reported via the returned exit code).
+func Exec(command string) (int, error) {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "exec",
 		Params: map[string]any{"command": command},
 	})
 	if err != nil {
-		return err
+		return 0, err
+	}
+	if resp.Error != "" {
+		return 0, fmt.Errorf("%s", resp.Error)
 	}
 	// The exec handler may rewrite ls commands to use the native ls handler,
 	// so the response could be either an ExecResult or a DirListing.
 	// Detect by checking for "entries" key (ls) vs "stdout" key (exec).
-	if resp.OK {
-		if m, ok := resp.Data.(map[string]any); ok {
-			if _, hasEntries := m["entries"]; hasEntries {
-				return printResponse(resp, "ls")
-			}
+	if m, ok := resp.Data.(map[string]any); ok {
+		if _, hasEntries := m["entries"]; hasEntries {
+			return 0, printResponse(resp, "ls")
 		}
+		if err := printResponse(resp, "exec"); err != nil {
+			return 0, err
+		}
+		code, _ := m["exit_code"].(float64)
+		return int(code), nil
 	}
-	return printResponse(resp, "exec")
+	return 0, printResponse(resp, "exec")
 }
 
 // Upload copies a local file to the remote.
