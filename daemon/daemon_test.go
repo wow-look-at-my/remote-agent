@@ -5,7 +5,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,4 +202,112 @@ func TestFindDeployBinary(t *testing.T) {
 func TestSshRunner(t *testing.T) {
 	// Verify the sshRunner struct implements Runner
 	var _ Runner = (*sshRunner)(nil)
+}
+
+// startPingListener stands up a Unix socket that accepts one connection and
+// replies to a request with a valid DaemonResponse, using the same JSON framing
+// the real daemon uses. It returns a cleanup that closes the listener.
+func startPingListener(t *testing.T, sockPath string) func() {
+	t.Helper()
+	l, err := net.Listen("unix", sockPath)
+	require.Nil(t, err)
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req protocol.DaemonRequest
+		if json.NewDecoder(conn).Decode(&req) != nil {
+			return
+		}
+		json.NewEncoder(conn).Encode(protocol.DaemonResponse{OK: true, Data: protocol.PingResult{Pong: true}})
+	}()
+
+	return func() { l.Close() }
+}
+
+func TestPingSocketAlive(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "alive.sock")
+	cleanup := startPingListener(t, sockPath)
+	defer cleanup()
+
+	assert.True(t, pingSocket(sockPath))
+}
+
+func TestPingSocketNoSocket(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "does-not-exist.sock")
+	assert.False(t, pingSocket(sockPath))
+}
+
+func TestPingSocketStale(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "stale.sock")
+	// Create the socket file, then close the listener so nothing accepts.
+	l, err := net.Listen("unix", sockPath)
+	require.Nil(t, err)
+	l.Close()
+
+	assert.False(t, pingSocket(sockPath))
+}
+
+func TestTouchActivity(t *testing.T) {
+	d := &Daemon{}
+	assert.True(t, d.lastActivity.IsZero())
+
+	d.touchActivity()
+	assert.False(t, d.lastActivity.IsZero())
+}
+
+func TestWatchIdleShutdown(t *testing.T) {
+	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
+	defer func() {
+		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
+	}()
+
+	idleTimeout = 1 * time.Millisecond
+	idleCheckInterval = 10 * time.Millisecond
+
+	done := make(chan struct{})
+	var once sync.Once
+	exitFunc = func(code int) { once.Do(func() { close(done) }) }
+
+	d := &Daemon{
+		sockPath:     filepath.Join(t.TempDir(), "idle.sock"),
+		pidPath:      filepath.Join(t.TempDir(), "idle.pid"),
+		lastActivity: time.Now().Add(-1 * time.Hour),
+	}
+
+	go d.watchIdle()
+
+	select {
+	case <-done:
+		// shutdown fired as expected
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchIdle did not trigger shutdown within timeout")
+	}
+}
+
+func TestHandleClientUpdatesActivity(t *testing.T) {
+	mock := newMockRunner()
+	mock.onCommand("echo pong", []byte("pong\n"), 0)
+	d := &Daemon{
+		runner:     mock,
+		remotePath: "/tmp/.remote-agent-test",
+	}
+
+	server, client := net.Pipe()
+	go func() {
+		json.NewEncoder(client).Encode(protocol.DaemonRequest{Action: "ping"})
+		var resp protocol.DaemonResponse
+		json.NewDecoder(client).Decode(&resp)
+		client.Close()
+	}()
+
+	d.handleClient(server)
+
+	d.mu.Lock()
+	last := d.lastActivity
+	d.mu.Unlock()
+	assert.False(t, last.IsZero())
 }
