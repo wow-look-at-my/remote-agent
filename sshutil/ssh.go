@@ -97,8 +97,10 @@ func Connect(host string, port int, user string) (*ConnResult, error) {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	// Start keepalive
-	go keepAlive(client)
+	// Start keepalive. Capture the interval on this (synchronous) goroutine so
+	// the spawned keepAlive goroutine never reads the keepAliveInterval package
+	// var concurrently (tests mutate it).
+	go keepAlive(client, keepAliveInterval)
 
 	return &ConnResult{
 		Client:      client,
@@ -244,8 +246,8 @@ func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 // keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.
 var keepAliveInterval = 30 * time.Second
 
-func keepAlive(client *ssh.Client) {
-	ticker := time.NewTicker(keepAliveInterval)
+func keepAlive(client *ssh.Client, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
 		_, _, err := client.SendRequest("keepalive@remote-agent", true, nil)
