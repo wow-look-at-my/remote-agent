@@ -125,7 +125,7 @@ func startDaemonProcess(self, target string, port int, logPath string) (*os.Proc
 	cmd := exec.Command(self, "connect", target, "--port", strconv.Itoa(port))
 	cmd.Stdout = logf
 	cmd.Stderr = logf
-	cmd.SysProcAttr = detachAttr()
+	cmd.SysProcAttr = daemonSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

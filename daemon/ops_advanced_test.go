@@ -41,7 +41,9 @@ func TestHandleEditErrorResponse(t *testing.T) {
 
 func TestHandleLs(t *testing.T) {
 	h, mock := newTestHandler()
-	output := "regular file\t100\t644\t1709300000\t/tmp/a.txt\nd\t4096\t755\t1709300000\t/tmp/subdir\n"
+	// Non-recursive ls now uses `find -maxdepth 1`, so output is the 6-field
+	// find format: type\tsize\tmode\ttime\tlinktarget\tpath
+	output := "f\t100\t644\t1709300000\t\t/tmp/a.txt\nd\t4096\t755\t1709300000\t\t/tmp/subdir\n"
 	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp"})
@@ -108,36 +110,6 @@ func TestHandleSysinfoError(t *testing.T) {
 
 	resp := h.handleSysinfo()
 	assert.False(t, resp.OK)
-
-}
-
-func TestParseLsOutput(t *testing.T) {
-	output := "d\t4096\t755\t1709300000\t/tmp/subdir\nregular file\t100\t644\t1709300000\t/tmp/test.txt\n"
-	entries := parseStatOutput(output)
-	require.Equal(t, 2, len(entries))
-	assert.True(t, entries[0].IsDir)
-	assert.False(t, entries[1].IsDir)
-	assert.Equal(t, int64(100), entries[1].Size)
-
-}
-
-func TestParseLsOutputSkipsDotEntries(t *testing.T) {
-	output := "d\t4096\t755\t1709300000\t.\nd\t4096\t755\t1709300000\t..\nd\t4096\t755\t1709300000\t/tmp/real\n"
-	entries := parseStatOutput(output)
-	assert.Equal(t, 1, len(entries))
-
-}
-
-func TestParseLsOutputEmpty(t *testing.T) {
-	entries := parseStatOutput("")
-	assert.Equal(t, 0, len(entries))
-
-}
-
-func TestParseLsOutputMalformed(t *testing.T) {
-	output := "not enough fields\n"
-	entries := parseStatOutput(output)
-	assert.Equal(t, 0, len(entries))
 
 }
 
@@ -339,21 +311,6 @@ func TestHandleExecAudit(t *testing.T) {
 
 }
 
-func TestParseLsOutputFractionalTime(t *testing.T) {
-	output := "d\t4096\t755\t1709300000.123456\t/tmp/dir\n"
-	entries := parseStatOutput(output)
-	require.Equal(t, 1, len(entries))
-	assert.Equal(t, int64(1709300000), entries[0].ModTime)
-
-}
-
-func TestParseLsOutputSkipsDotInPath(t *testing.T) {
-	output := "d\t4096\t755\t1709300000\t/path/to/.\nd\t4096\t755\t1709300000\t/path/to/..\nf\t100\t644\t1709300000\t/path/to/file\n"
-	entries := parseStatOutput(output)
-	assert.Equal(t, 1, len(entries))
-
-}
-
 // --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---
 
 func TestParseLsCommand(t *testing.T) {
@@ -505,14 +462,6 @@ func TestParseFindOutputSkipsDots(t *testing.T) {
 func TestParseFindOutputEmpty(t *testing.T) {
 	entries := parseFindOutput("")
 	assert.Equal(t, 0, len(entries))
-}
-
-func TestParseStatOutputSymlink(t *testing.T) {
-	output := "symbolic link\t12\t777\t1709300000\t/tmp/link\n"
-	entries := parseStatOutput(output)
-	require.Equal(t, 1, len(entries))
-	assert.True(t, entries[0].IsLink)
-	assert.False(t, entries[0].IsDir)
 }
 
 func TestHandleDispatchReadlink(t *testing.T) {

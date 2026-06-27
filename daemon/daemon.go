@@ -13,21 +13,29 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
 	"github.com/wow-look-at-my/remote-agent/sshutil"
 	"golang.org/x/crypto/ssh"
 )
 
+// Idle-timeout tuning. Overridable in tests.
+var (
+	idleTimeout       = 30 * time.Minute
+	idleCheckInterval = 60 * time.Second
+)
+
 // Daemon holds a persistent SSH connection and serves requests over a Unix socket.
 type Daemon struct {
-	conn       *sshutil.ConnResult
-	runner     Runner // abstraction over SSH command execution
-	remotePath string // path to remote helper binary
-	sockPath   string
-	pidPath    string
-	listener   net.Listener
-	mu         sync.Mutex // serialize SSH session access
+	conn         *sshutil.ConnResult
+	runner       Runner // abstraction over SSH command execution
+	remotePath   string // path to remote helper binary
+	sockPath     string
+	pidPath      string
+	listener     net.Listener
+	mu           sync.Mutex // serialize SSH session access; also guards lastActivity
+	lastActivity time.Time  // time of the last client request (guarded by mu)
 }
 
 // sshRunner implements Runner using a real SSH client.
@@ -63,6 +71,29 @@ func Start(target string, port int) error {
 		return err
 	}
 
+	// Auto-connect: if a daemon for this target is already up and answering,
+	// reuse it rather than dialing/deploying a second time.
+	sockPath := SocketPath(target)
+	if pingSocket(sockPath) {
+		fmt.Fprintf(os.Stderr, "Already connected to %s\n", target)
+		return nil
+	}
+
+	// Resolve any ~/.ssh/config Host alias to its real hostname/user/port via
+	// `ssh -G`, so a bare alias like "myserver" connects to the configured host.
+	// Only fill in values the caller did not supply explicitly.
+	if cfg := sshutil.ResolveSSHConfig(host); cfg != nil {
+		if cfg.HostName != "" {
+			host = cfg.HostName
+		}
+		if cfg.User != "" && !strings.Contains(target, "@") { // only when user wasn't explicitly given
+			user = cfg.User
+		}
+		if cfg.Port != 0 && port == 22 { // only override the default port
+			port = cfg.Port
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "Connecting to %s@%s:%d...\n", user, host, port)
 
 	// SSH connect
@@ -90,11 +121,12 @@ func Start(target string, port int) error {
 	runner.Run(auditCmd)
 
 	d := &Daemon{
-		conn:       conn,
-		runner:     runner,
-		remotePath: remotePath,
-		sockPath:   SocketPath(target),
-		pidPath:    PIDPath(target),
+		conn:         conn,
+		runner:       runner,
+		remotePath:   remotePath,
+		sockPath:     sockPath,
+		pidPath:      PIDPath(target),
+		lastActivity: time.Now(),
 	}
 
 	// Clean up any stale socket
@@ -123,6 +155,9 @@ func Start(target string, port int) error {
 		os.Exit(0)
 	}()
 
+	// Shut down automatically after a period of inactivity.
+	go d.watchIdle()
+
 	// Accept connections
 	for {
 		conn, err := d.listener.Accept()
@@ -132,6 +167,27 @@ func Start(target string, port int) error {
 		}
 		go d.handleClient(conn)
 	}
+}
+
+// pingSocket reports whether a live daemon is already listening at sockPath. It
+// dials the Unix socket (2s timeout), sends a ping request using the same JSON
+// framing as the client, and returns true if any valid DaemonResponse decodes.
+// A read deadline ensures a present-but-dead socket cannot hang the caller.
+func pingSocket(sockPath string) bool {
+	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	if err := json.NewEncoder(conn).Encode(protocol.DaemonRequest{Action: "ping"}); err != nil {
+		return false
+	}
+
+	var resp protocol.DaemonResponse
+	return json.NewDecoder(conn).Decode(&resp) == nil
 }
 
 func (d *Daemon) handleClient(conn net.Conn) {
@@ -146,9 +202,40 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		return
 	}
 
+	// Record activity so the idle watchdog doesn't shut us down mid-use. The
+	// handlers acquire mu themselves, so touchActivity takes and releases mu on
+	// its own before dispatch (no nested lock, no deadlock).
+	d.touchActivity()
+
 	handler := &Handler{daemon: d}
 	resp := handler.Handle(&req)
 	encoder.Encode(resp)
+}
+
+// touchActivity records the time of the most recent client request. It is safe
+// to call without holding mu; it locks mu for the field write.
+func (d *Daemon) touchActivity() {
+	d.mu.Lock()
+	d.lastActivity = time.Now()
+	d.mu.Unlock()
+}
+
+// watchIdle shuts the daemon down once it has been idle for idleTimeout. It
+// fires at most once.
+func (d *Daemon) watchIdle() {
+	ticker := time.NewTicker(idleCheckInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		d.mu.Lock()
+		idle := time.Since(d.lastActivity)
+		d.mu.Unlock()
+		if idle > idleTimeout {
+			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
+			d.shutdown()
+			exitFunc(0)
+			return
+		}
+	}
 }
 
 func (d *Daemon) shutdown() {

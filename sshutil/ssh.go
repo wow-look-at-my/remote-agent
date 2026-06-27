@@ -2,15 +2,62 @@ package sshutil
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// SSHConfig holds the fields resolved from `ssh -G <host>` (the effective SSH
+// client configuration, including any ~/.ssh/config Host alias).
+type SSHConfig struct {
+	HostName string
+	User     string
+	Port     int
+}
+
+// sshGCommand builds the `ssh -G <host>` command. It is a test seam so the
+// resolver can be exercised without invoking the real ssh binary.
+var sshGCommand = func(host string) *exec.Cmd { return exec.Command("ssh", "-G", host) }
+
+// ResolveSSHConfig runs `ssh -G <host>` and parses the effective hostname, user,
+// and port for the given host (resolving any ~/.ssh/config Host alias). It
+// returns nil if ssh is unavailable or the command fails. Unknown keys and an
+// unparseable port are silently ignored.
+func ResolveSSHConfig(host string) *SSHConfig {
+	out, err := sshGCommand(host).Output()
+	if err != nil {
+		slog.Debug("ssh -G failed; skipping ssh config resolution", "host", host, "error", err)
+		return nil
+	}
+
+	cfg := &SSHConfig{}
+	for _, line := range strings.Split(string(out), "\n") {
+		key, value, found := strings.Cut(line, " ")
+		if !found {
+			continue
+		}
+		switch strings.ToLower(key) {
+		case "hostname":
+			cfg.HostName = value
+		case "user":
+			cfg.User = value
+		case "port":
+			if p, err := strconv.Atoi(value); err == nil {
+				cfg.Port = p
+			}
+		}
+	}
+	return cfg
+}
 
 // ConnResult holds the SSH client and metadata from a successful connection.
 type ConnResult struct {

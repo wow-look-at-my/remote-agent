@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -438,4 +439,72 @@ func TestKeepAliveDisconnect(t *testing.T) {
 
 	// keepAlive should return after disconnect
 	<-done
+}
+
+func TestResolveSSHConfig(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	sshGCommand = func(host string) *exec.Cmd {
+		return exec.Command("echo", "hostname 1.2.3.4\nuser bob\nport 2222")
+	}
+
+	cfg := ResolveSSHConfig("myalias")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "1.2.3.4", cfg.HostName)
+	assert.Equal(t, "bob", cfg.User)
+	assert.Equal(t, 2222, cfg.Port)
+}
+
+func TestResolveSSHConfigMultipleLines(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	// Realistic `ssh -G` output: the three wanted keys interleaved with many
+	// extra fields that must be ignored.
+	sshGCommand = func(host string) *exec.Cmd {
+		return exec.Command("echo", "identityfile ~/.ssh/id_rsa\nhostname example.com\nforwardagent no\nuser deploy\naddkeystoagent no\nport 2200\nciphers aes128-ctr")
+	}
+
+	cfg := ResolveSSHConfig("myalias")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "example.com", cfg.HostName)
+	assert.Equal(t, "deploy", cfg.User)
+	assert.Equal(t, 2200, cfg.Port)
+}
+
+func TestResolveSSHConfigCommandFails(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	sshGCommand = func(host string) *exec.Cmd {
+		return exec.Command("false")
+	}
+
+	assert.Nil(t, ResolveSSHConfig("myalias"))
+}
+
+func TestResolveSSHConfigPartialOutput(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	sshGCommand = func(host string) *exec.Cmd {
+		return exec.Command("echo", "hostname only.example.com")
+	}
+
+	cfg := ResolveSSHConfig("myalias")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "only.example.com", cfg.HostName)
+	assert.Equal(t, "", cfg.User)
+	assert.Equal(t, 0, cfg.Port)
+}
+
+func TestResolveSSHConfigInvalidPort(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	sshGCommand = func(host string) *exec.Cmd {
+		return exec.Command("echo", "hostname h.example.com\nport notanumber\nuser carol")
+	}
+
+	cfg := ResolveSSHConfig("myalias")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "h.example.com", cfg.HostName)
+	assert.Equal(t, "carol", cfg.User)
+	assert.Equal(t, 0, cfg.Port) // unparseable port is silently skipped
 }

@@ -267,13 +267,14 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
+	// Use find for both modes; %y gives type (d/f/l), %l gives symlink target.
+	// find is present on BusyBox (and other minimal images) where GNU
+	// `stat --format` is not. The non-recursive case just caps depth at 1.
 	var cmd string
 	if recursive {
-		// Use find for recursive listing; %y gives type (d/f/l), %l gives symlink target
 		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
 	} else {
-		// Use stat with dereferenced info + readlink for symlink targets
-		cmd = fmt.Sprintf("stat --format='%%F\\t%%s\\t%%a\\t%%Y\\t%%n' %s/* %s/.* 2>/dev/null || true", shellEscape(path), shellEscape(path))
+		cmd = fmt.Sprintf("find %s -maxdepth 1 -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
 	}
 
 	stdout, _, _, err := h.daemon.runner.Run(cmd)
@@ -281,12 +282,7 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("ls failed: %w", err))
 	}
 
-	var entries []protocol.DirEntry
-	if recursive {
-		entries = parseFindOutput(string(stdout))
-	} else {
-		entries = parseStatOutput(string(stdout))
-	}
+	entries := parseFindOutput(string(stdout))
 	return okResponse(protocol.DirListing{Path: path, Entries: entries})
 }
 
@@ -327,47 +323,6 @@ func parseFindOutput(output string) []protocol.DirEntry {
 		if typeField == "l" {
 			entry.IsLink = true
 			entry.Target = linkTarget
-		}
-		entries = append(entries, entry)
-	}
-	return entries
-}
-
-// parseStatOutput parses output from stat with format: type\tsize\tmode\ttime\tpath
-func parseStatOutput(output string) []protocol.DirEntry {
-	var entries []protocol.DirEntry
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 5)
-		if len(fields) < 5 {
-			continue
-		}
-
-		typeField := fields[0]
-		size := parseInt64(fields[1])
-		mode := fields[2]
-		modTime := parseInt64(strings.Split(fields[3], ".")[0])
-		name := fields[4]
-
-		baseName := name
-		if idx := strings.LastIndex(name, "/"); idx >= 0 {
-			baseName = name[idx+1:]
-		}
-		if baseName == "." || baseName == ".." {
-			continue
-		}
-
-		entry := protocol.DirEntry{
-			Name:    name,
-			Size:    size,
-			Mode:    mode,
-			IsDir:   typeField == "d" || typeField == "directory",
-			ModTime: modTime,
-		}
-		if typeField == "symbolic link" {
-			entry.IsLink = true
 		}
 		entries = append(entries, entry)
 	}
