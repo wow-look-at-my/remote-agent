@@ -407,7 +407,7 @@ func TestKeepAlive(t *testing.T) {
 	defer func() { keepAliveInterval = oldInterval }()
 
 	// Start keepalive - it should run at least once
-	go keepAlive(client)
+	go keepAlive(client, keepAliveInterval)
 
 	// Wait a bit for at least one keepalive
 	time.Sleep(50 * time.Millisecond)
@@ -429,7 +429,7 @@ func TestKeepAliveDisconnect(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		keepAlive(client)
+		keepAlive(client, keepAliveInterval)
 		close(done)
 	}()
 
