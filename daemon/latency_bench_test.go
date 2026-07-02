@@ -294,14 +294,13 @@ func BenchmarkRawSSHCommandRTT(b *testing.B) {
 	require.NoError(b, err)
 	defer client.Close()
 
-	if _, _, _, err := sshutil.RunCommand(client, "true"); err != nil {
-		b.Fatalf("warmup: %v", err)
-	}
+	_, _, _, err = sshutil.RunCommand(client, "true")
+	require.Nil(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, _, code, err := sshutil.RunCommand(client, "true"); err != nil || code != 0 {
-			b.Fatalf("run: code=%d err=%v", code, err)
-		}
+		_, _, code, err := sshutil.RunCommand(client, "true")
+		require.False(b, err != nil || code != 0)
+
 	}
 }
