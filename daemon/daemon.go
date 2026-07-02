@@ -34,8 +34,25 @@ type Daemon struct {
 	sockPath     string
 	pidPath      string
 	listener     net.Listener
-	mu           sync.Mutex // serialize SSH session access; also guards lastActivity
-	lastActivity time.Time  // time of the last client request (guarded by mu)
+	mu           sync.Mutex     // serialize SSH session access; also guards lastActivity
+	lastActivity time.Time      // time of the last client request (guarded by mu)
+	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
+}
+
+// auditAsync writes an audit entry on the remote without blocking the
+// operation it describes: the audit command runs on its own SSH channel,
+// concurrently with the operation. This halves the network round trips per
+// operation compared to running the audit serially first. shutdown drains
+// in-flight audits via auditWG, so a graceful shutdown never loses entries.
+// Audit failures are ignored, exactly as they were when the call was serial.
+func (d *Daemon) auditAsync(action, detail string) {
+	cmd := fmt.Sprintf("%s serve audit --action %s --detail %s",
+		d.remotePath, shellEscape(action), shellEscape(detail))
+	d.auditWG.Add(1)
+	go func() {
+		defer d.auditWG.Done()
+		d.runner.Run(cmd)
+	}()
 }
 
 // sshRunner implements Runner using a real SSH client.
@@ -239,6 +256,10 @@ func (d *Daemon) watchIdle() {
 }
 
 func (d *Daemon) shutdown() {
+	// Drain in-flight async audit writes before the shutdown audit/cleanup so
+	// no entries are lost and the shutdown entry stays last.
+	d.auditWG.Wait()
+
 	if d.runner != nil {
 		// Send shutdown audit to remote
 		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)

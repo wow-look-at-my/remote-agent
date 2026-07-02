@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-// mockRunner records commands and returns configured responses.
+// mockRunner records commands and returns configured responses. It is safe
+// for concurrent use: audit commands run on their own goroutines.
 type mockRunner struct {
+	mu        sync.Mutex
 	calls     []mockCall
 	responses map[string]mockResponse
 	// fallback response for unmatched commands
@@ -41,6 +44,8 @@ func newMockRunner() *mockRunner {
 }
 
 func (m *mockRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, mockCall{Command: command})
 	if resp, ok := m.responses[command]; ok {
 		return resp.stdout, resp.stderr, resp.exitCode, resp.err
@@ -49,11 +54,21 @@ func (m *mockRunner) Run(command string) (stdout, stderr []byte, exitCode int, e
 }
 
 func (m *mockRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, mockCall{Command: command, Stdin: stdin})
 	if resp, ok := m.responses[command]; ok {
 		return resp.stdout, resp.stderr, resp.exitCode, resp.err
 	}
 	return m.defaultResponse.stdout, m.defaultResponse.stderr, m.defaultResponse.exitCode, m.defaultResponse.err
+}
+
+// snapshotCalls returns a copy of the recorded calls, safe against concurrent
+// audit goroutines.
+func (m *mockRunner) snapshotCalls() []mockCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]mockCall(nil), m.calls...)
 }
 
 func (m *mockRunner) onCommand(cmd string, stdout []byte, exitCode int) {
@@ -161,7 +176,8 @@ func TestHandleWrite(t *testing.T) {
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello"})
 	assert.True(t, resp.OK)
-	assert.GreaterOrEqual(t, len(mock.calls), 2) // Verify audit was called
+	h.daemon.auditWG.Wait()                                // audits run async; drain before asserting
+	assert.GreaterOrEqual(t, len(mock.snapshotCalls()), 2) // Verify audit was called
 }
 
 func TestHandleWriteMissingPath(t *testing.T) {

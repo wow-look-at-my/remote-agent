@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -306,9 +307,18 @@ func TestHandleExecAudit(t *testing.T) {
 
 	resp := h.handleExec(map[string]any{"command": "whoami"})
 	assert.True(t, resp.OK)
-	assert.GreaterOrEqual(t, // Verify audit command was called before actual command
-		len(mock.calls), 2)
+	h.daemon.auditWG.Wait() // audits run async; drain before asserting
+	calls := mock.snapshotCalls()
+	assert.GreaterOrEqual(t, len(calls), 2) // audit + actual command both recorded
 
+	var auditSeen bool
+	for _, c := range calls {
+		if strings.Contains(c.Command, "serve audit --action 'exec'") &&
+			strings.Contains(c.Command, "whoami") {
+			auditSeen = true
+		}
+	}
+	assert.True(t, auditSeen, "expected an exec audit entry, got %v", calls)
 }
 
 // --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---

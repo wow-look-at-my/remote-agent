@@ -44,10 +44,8 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
-	// Audit log the command
-	auditCmd := fmt.Sprintf("%s serve audit --action exec --detail %s",
-		h.daemon.remotePath, shellEscape(command))
-	h.daemon.runner.Run(auditCmd)
+	// Audit log the command (concurrently, on its own SSH channel).
+	h.daemon.auditAsync("exec", command)
 
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(command)
 	if err != nil {
@@ -137,10 +135,8 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
-	// Audit
-	auditCmd := fmt.Sprintf("%s serve audit --action write --detail %s",
-		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", path, len(content))))
-	h.daemon.runner.Run(auditCmd)
+	// Audit (concurrently, on its own SSH channel)
+	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(content)))
 
 	// Write via cat, using base64 to avoid binary issues
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
@@ -173,10 +169,8 @@ func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
-	// Audit
-	auditCmd := fmt.Sprintf("%s serve audit --action upload --detail %s",
-		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", remotePath, len(data))))
-	h.daemon.runner.Run(auditCmd)
+	// Audit (concurrently, on its own SSH channel)
+	h.daemon.auditAsync("upload", fmt.Sprintf("path=%s size=%d", remotePath, len(data)))
 
 	// Write via stdin pipe (handles binary data correctly)
 	cmd := fmt.Sprintf("cat > %s", shellEscape(remotePath))

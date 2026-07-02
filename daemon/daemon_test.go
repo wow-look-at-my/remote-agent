@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,61 @@ func TestShutdownWithRunner(t *testing.T) {
 		// Verify audit and cleanup commands were run
 		GreaterOrEqual(t, len(mock.calls), 2)
 
+}
+
+// slowAuditRunner delays audit commands and records completion order, so the
+// test can prove shutdown drains in-flight async audits before proceeding.
+type slowAuditRunner struct {
+	mu        sync.Mutex
+	completed []string
+	delay     time.Duration
+}
+
+func (r *slowAuditRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	if strings.Contains(command, "serve audit --action 'exec'") {
+		time.Sleep(r.delay)
+	}
+	r.mu.Lock()
+	r.completed = append(r.completed, command)
+	r.mu.Unlock()
+	return nil, nil, 0, nil
+}
+
+func (r *slowAuditRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
+func TestShutdownDrainsPendingAudits(t *testing.T) {
+	runner := &slowAuditRunner{delay: 50 * time.Millisecond}
+	d := &Daemon{
+		runner:     runner,
+		remotePath: "/tmp/.remote-agent-test",
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+	}
+	h := &Handler{daemon: d}
+
+	resp := h.handleExec(map[string]any{"command": "whoami"})
+	require.True(t, resp.OK)
+
+	// The exec audit is still sleeping in its goroutine here. shutdown must
+	// wait for it before writing the shutdown audit entry.
+	d.shutdown()
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	execAuditIdx, shutdownAuditIdx := -1, -1
+	for i, c := range runner.completed {
+		if strings.Contains(c, "serve audit --action 'exec'") {
+			execAuditIdx = i
+		}
+		if strings.Contains(c, "serve audit --action shutdown") {
+			shutdownAuditIdx = i
+		}
+	}
+	require.NotEqual(t, -1, execAuditIdx, "exec audit was lost: %v", runner.completed)
+	require.NotEqual(t, -1, shutdownAuditIdx, "shutdown audit missing: %v", runner.completed)
+	assert.Less(t, execAuditIdx, shutdownAuditIdx, "shutdown audit must come after drained exec audit")
 }
 
 func TestShutdownNilRunner(t *testing.T) {
