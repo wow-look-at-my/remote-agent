@@ -43,7 +43,7 @@ remote-agent upload ./local.txt /tmp/remote.txt
 remote-agent download /tmp/remote.txt ./local.txt
 remote-agent readlink /usr/bin/python
 
-# 3. Disconnect — stops the daemon and removes the remote helper
+# 3. Disconnect — stops the daemon (the helper stays cached for fast reconnects)
 remote-agent disconnect
 ```
 
@@ -82,7 +82,7 @@ A daemon started by this command is stopped again when claude exits; pass
 |---------|-------------|
 | `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
 | `claude [user@host]` | Launch Claude Code with its Bash shell wired to run on the remote. `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
-| `disconnect` | Stop the daemon and remove the remote helper. |
+| `disconnect` | Stop the daemon. The helper binary stays cached in `~/.cache/remote-agent` on the remote, so the next connect skips the upload. |
 | `ping` | Check that the daemon and remote are alive. |
 | `exec <command...>` | Run a shell command on the remote. |
 | `ls [path]` | List a remote directory. `--recursive` walks subdirectories. |
@@ -114,6 +114,8 @@ A daemon started by this command is stopped again when claude exits; pass
 - A copy of the binary is **deployed to the remote** and invoked as a hidden
   `serve` subcommand for operations that need structured output there (`sysinfo`,
   `ps`, `edit`), with start/stop/action **audit logging** to the remote's syslog.
+  The helper is content-addressed and cached in `~/.cache/remote-agent`, so
+  reconnects skip the multi-megabyte upload when the binary is unchanged.
 
 Authentication uses your SSH agent and `~/.ssh` keys. The host-key fingerprint is
 printed on connect; when there is no `known_hosts` entry, the first connection is

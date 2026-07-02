@@ -45,7 +45,7 @@ Three roles, one binary:
  CLI client             local daemon                      remote agent
  (cmd/, client/)        (daemon/)                         (agent/)
  ───────────────  unix socket  ───────────────────  SSH  ────────────────────
- remote-agent ls ─JSON req──▶  handler → ops          ─cmd─▶ /tmp/.remote-agent-xxx
+ remote-agent ls ─JSON req──▶  handler → ops          ─cmd─▶ ~/.cache/remote-agent/agent-xxx
                 ◀─JSON resp──   (one SSH connection)  ◀────  (hidden serve subcommands)
 ```
 
@@ -65,14 +65,17 @@ Three roles, one binary:
 
 ### Request lifecycle
 
-`connect` dials SSH, prints the host-key fingerprint, deploys
-`/tmp/.remote-agent-<rand>`, writes a startup audit entry, then listens. Each
+`connect` dials SSH, prints the host-key fingerprint, deploys the helper to a
+content-addressed path (`~/.cache/remote-agent/agent-<sha256[:8]>`) — reusing an
+identical cached copy when present, so reconnects skip the multi-MB upload — then
+writes a startup audit entry and listens. When `$HOME` is unusable it falls back
+to a random `/tmp/.remote-agent-<rand>` path (removed again on disconnect). Each
 command: the client locates the socket → the daemon runs either a plain shell
 command or `<remote-binary> serve <sub>` on its own SSH channel (the audit entry
 for exec/write/upload runs concurrently on another channel) → returns a
 `protocol.DaemonResponse`. The idle watchdog never fires while operations are in
-flight. `disconnect` drains pending audits, writes a shutdown audit entry, `rm`s
-the remote binary, removes the socket/PID files, and exits.
+flight. `disconnect` drains pending audits, writes a shutdown audit entry, removes
+the socket/PID files, and exits; cached helpers stay in place for the next connect.
 
 ### Packages
 

@@ -17,7 +17,6 @@ import (
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
 	"github.com/wow-look-at-my/remote-agent/sshutil"
-	"golang.org/x/crypto/ssh"
 )
 
 // Idle-timeout tuning. Overridable in tests.
@@ -34,6 +33,7 @@ type Daemon struct {
 	sockPath     string
 	pidPath      string
 	listener     net.Listener
+	keepBinary   bool           // helper lives in the remote cache dir; leave it for the next connect
 	mu           sync.Mutex     // guards lastActivity and activeOps
 	lastActivity time.Time      // time of the last client request start/finish (guarded by mu)
 	activeOps    int            // number of requests currently being handled (guarded by mu)
@@ -129,18 +129,22 @@ func Start(target string, port int) error {
 
 	fmt.Fprintf(os.Stderr, "Connected. Key fingerprint: %s\n", conn.Fingerprint)
 
-	// Deploy helper binary
-	remotePath, err := deployBinary(conn.Client)
+	// The runner keeps spare SSH sessions pre-opened so each command skips
+	// the channel-open round trip.
+	runner := sshutil.NewCommandRunner(conn.Client)
+
+	// Deploy helper binary (or reuse the cached copy from a previous connect)
+	remotePath, cached, err := deployBinary(runner)
 	if err != nil {
 		conn.Client.Close()
 		return fmt.Errorf("deploy: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
-
-	// The runner keeps spare SSH sessions pre-opened so each command skips
-	// the channel-open round trip.
-	runner := sshutil.NewCommandRunner(conn.Client)
+	if cached {
+		fmt.Fprintf(os.Stderr, "Reusing cached helper at %s\n", remotePath)
+	} else {
+		fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
+	}
 
 	// Run startup audit
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s",
@@ -151,6 +155,7 @@ func Start(target string, port int) error {
 		conn:         conn,
 		runner:       runner,
 		remotePath:   remotePath,
+		keepBinary:   cachedDeploy(remotePath),
 		sockPath:     sockPath,
 		pidPath:      PIDPath(target),
 		lastActivity: time.Now(),
@@ -268,8 +273,11 @@ func (d *Daemon) shutdown() {
 		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
 		d.runner.Run(auditCmd)
 
-		// Delete remote binary
-		d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
+		// Delete the remote binary, unless it lives in the content-addressed
+		// cache dir — then it stays for the next connect to reuse.
+		if !d.keepBinary {
+			d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
+		}
 	}
 
 	d.cleanup()
@@ -286,32 +294,74 @@ func (d *Daemon) cleanup() {
 	}
 }
 
-func deployBinary(client *ssh.Client) (string, error) {
+// deployBinary ships the helper binary to the remote and returns its path.
+// reused reports that an identical cached binary was already present and no
+// upload happened.
+func deployBinary(runner Runner) (remotePath string, reused bool, err error) {
 	// Find the binary to deploy
 	localBinary, err := findDeployBinary()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	data, err := os.ReadFile(localBinary)
 	if err != nil {
-		return "", fmt.Errorf("read binary %s: %w", localBinary, err)
+		return "", false, fmt.Errorf("read binary %s: %w", localBinary, err)
 	}
 
-	// Generate random remote path
-	remotePath := fmt.Sprintf("/tmp/.remote-agent-%s", randomSuffix())
+	return deployBinaryData(runner, data)
+}
 
-	// Copy via cat > path
-	cmd := fmt.Sprintf("cat > %s && chmod 700 %s", remotePath, remotePath)
-	_, stderr, exitCode, err := sshutil.RunCommandWithStdin(client, cmd, data)
+// deployBinaryData deploys the given helper binary bytes. The remote path is
+// content-addressed (sha256 of the binary) under ~/.cache/remote-agent, so a
+// reconnect finds the identical binary already in place and skips uploading
+// the multi-megabyte payload entirely. The cache lives under $HOME rather
+// than world-writable /tmp so no other user can pre-plant or swap the file,
+// and uploads go through a unique temp path plus rename so a concurrent
+// connect can never observe a partial binary.
+func deployBinaryData(runner Runner, data []byte) (remotePath string, reused bool, err error) {
+	sum := sha256.Sum256(data)
+
+	var remoteDir string
+	if home, _, exitCode, err := runner.Run(`printf %s "$HOME"`); err == nil && exitCode == 0 &&
+		len(home) > 0 && home[0] == '/' {
+		remoteDir = fmt.Sprintf("%s/.cache/remote-agent", strings.TrimSpace(string(home)))
+		remotePath = fmt.Sprintf("%s/agent-%x", remoteDir, sum[:8])
+
+		// Reuse a cached binary whose content hash matches ours.
+		checkCmd := fmt.Sprintf("sha256sum %s 2>/dev/null", shellEscape(remotePath))
+		if stdout, _, code, err := runner.Run(checkCmd); err == nil && code == 0 &&
+			strings.HasPrefix(strings.TrimSpace(string(stdout)), fmt.Sprintf("%x", sum)) {
+			return remotePath, true, nil
+		}
+	} else {
+		// No usable $HOME (or probe failed): fall back to a random /tmp path.
+		// It is removed again on disconnect (keepBinary stays false).
+		remotePath = fmt.Sprintf("/tmp/.remote-agent-%s", randomSuffix())
+	}
+
+	tmpPath := fmt.Sprintf("%s.tmp-%s", remotePath, randomSuffix())
+	cmd := fmt.Sprintf("cat > %s && chmod 700 %s && mv -f %s %s",
+		shellEscape(tmpPath), shellEscape(tmpPath), shellEscape(tmpPath), shellEscape(remotePath))
+	if remoteDir != "" {
+		cmd = fmt.Sprintf("mkdir -p %s && %s", shellEscape(remoteDir), cmd)
+	}
+	_, stderr, exitCode, err := runner.RunStdin(cmd, data)
 	if err != nil {
-		return "", fmt.Errorf("copy binary: %w", err)
+		return "", false, fmt.Errorf("copy binary: %w", err)
 	}
 	if exitCode != 0 {
-		return "", fmt.Errorf("copy binary failed (exit %d): %s", exitCode, string(stderr))
+		return "", false, fmt.Errorf("copy binary failed (exit %d): %s", exitCode, string(stderr))
 	}
 
-	return remotePath, nil
+	return remotePath, false, nil
+}
+
+// cachedDeploy reports whether remotePath lives in the persistent helper
+// cache (as opposed to a throwaway /tmp path), in which case disconnect
+// leaves it in place for the next connect to reuse.
+func cachedDeploy(remotePath string) bool {
+	return strings.Contains(remotePath, "/.cache/remote-agent/")
 }
 
 func findDeployBinary() (string, error) {

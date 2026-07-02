@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -254,6 +256,119 @@ func TestFindDeployBinary(t *testing.T) {
 	_, err := findDeployBinary()
 	// May succeed (finds our test binary) or fail (no linux-amd64 variant)
 	_ = err
+}
+
+func deployTestFixture() (data []byte, cachePath string) {
+	data = []byte("fake-helper-binary")
+	sum := sha256.Sum256(data)
+	return data, fmt.Sprintf("/home/u/.cache/remote-agent/agent-%x", sum[:8])
+}
+
+func TestDeployBinaryDataUploadsWhenNotCached(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	mock.onCommandErr(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath), []byte(""), 1)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.Equal(t, wantPath, path)
+	assert.True(t, cachedDeploy(path))
+
+	// The upload must stream the binary via stdin to a temp path, then mv it
+	// into place after chmod (so a concurrent connect never sees a partial or
+	// not-yet-executable file).
+	uploads := 0
+	for _, c := range mock.snapshotCalls() {
+		if c.Stdin != nil {
+			uploads++
+			assert.Equal(t, data, c.Stdin)
+			assert.Contains(t, c.Command, "mkdir -p '/home/u/.cache/remote-agent'")
+			assert.Contains(t, c.Command, "chmod 700")
+			assert.Contains(t, c.Command, fmt.Sprintf("mv -f"))
+			assert.Contains(t, c.Command, fmt.Sprintf("'%s'", wantPath))
+		}
+	}
+	assert.Equal(t, 1, uploads, "exactly one upload expected")
+}
+
+func TestDeployBinaryDataReusesCachedBinary(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+	sum := sha256.Sum256(data)
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	mock.onCommand(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath),
+		[]byte(fmt.Sprintf("%x  %s\n", sum, wantPath)), 0)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.True(t, reused)
+	assert.Equal(t, wantPath, path)
+
+	for _, c := range mock.snapshotCalls() {
+		assert.Nil(t, c.Stdin, "cache hit must not upload anything, ran: %s", c.Command)
+	}
+}
+
+func TestDeployBinaryDataHashMismatchReuploads(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	// A file exists at the cache path but its content differs (stale or
+	// corrupt): it must be replaced, not trusted.
+	mock.onCommand(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath),
+		[]byte(fmt.Sprintf("deadbeef  %s\n", wantPath)), 0)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.Equal(t, wantPath, path)
+
+	uploads := 0
+	for _, c := range mock.snapshotCalls() {
+		if c.Stdin != nil {
+			uploads++
+			assert.Equal(t, data, c.Stdin)
+		}
+	}
+	assert.Equal(t, 1, uploads)
+}
+
+func TestDeployBinaryDataNoHomeFallsBackToTmp(t *testing.T) {
+	mock := newMockRunner()
+	mock.onCommandErr(`printf %s "$HOME"`, []byte("no home"), 1)
+
+	path, reused, err := deployBinaryData(mock, []byte("bin"))
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.True(t, strings.HasPrefix(path, "/tmp/.remote-agent-"), "got %s", path)
+	assert.False(t, cachedDeploy(path))
+}
+
+func TestCachedDeploy(t *testing.T) {
+	assert.True(t, cachedDeploy("/home/u/.cache/remote-agent/agent-ab12cd"))
+	assert.False(t, cachedDeploy("/tmp/.remote-agent-xyz12345"))
+}
+
+func TestShutdownKeepsCachedBinary(t *testing.T) {
+	mock := newMockRunner()
+	d := &Daemon{
+		runner:     mock,
+		remotePath: "/home/u/.cache/remote-agent/agent-ab12cd",
+		keepBinary: true,
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+	}
+	d.shutdown()
+
+	for _, c := range mock.snapshotCalls() {
+		assert.False(t, strings.HasPrefix(c.Command, "rm -f"),
+			"cached helper must not be deleted on shutdown, ran: %s", c.Command)
+	}
 }
 
 func TestSshRunner(t *testing.T) {
