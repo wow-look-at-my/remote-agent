@@ -117,9 +117,10 @@ A daemon started by this command is stopped again when claude exits; pass
   The helper is content-addressed and cached in `~/.cache/remote-agent`, so
   reconnects skip the multi-megabyte upload when the binary is unchanged.
 
-Authentication uses your SSH agent and `~/.ssh` keys. The host-key fingerprint is
-printed on connect; when there is no `known_hosts` entry, the first connection is
-trust-on-first-use, so verify the printed fingerprint.
+Authentication uses your SSH agent and `~/.ssh` keys. Host keys follow OpenSSH
+`accept-new` semantics: the first connection to an unknown host is trusted and its
+key recorded in `~/.ssh/known_hosts`, and every later connection must match the
+recorded key. The fingerprint is printed on connect — verify it on first contact.
 
 There is **one daemon per target host** (the socket path is derived from the
 target), so multiple terminals targeting the same host share a connection. When

@@ -72,6 +72,37 @@ func TestHandleLsRecursive(t *testing.T) {
 
 }
 
+func TestHandleLsMissingDirErrors(t *testing.T) {
+	h, mock := newTestHandler()
+	// A nonexistent path makes find fail with no output; this used to be
+	// silently reported as an empty directory listing.
+	mock.defaultResponse = mockResponse{
+		stderr:   []byte("find: '/nope': No such file or directory\n"),
+		exitCode: 1,
+	}
+
+	resp := h.handleLs(map[string]any{"path": "/nope"})
+	assert.False(t, resp.OK)
+	assert.Contains(t, resp.Error, "No such file or directory")
+}
+
+func TestHandleLsPartialListingStillSucceeds(t *testing.T) {
+	h, mock := newTestHandler()
+	// Recursive walks can fail on some subtrees (permission denied) while
+	// still finding entries; the partial listing must be returned.
+	mock.defaultResponse = mockResponse{
+		stdout:   []byte("f\t100\t644\t1709300000\t\t/tmp/a.txt\n"),
+		stderr:   []byte("find: '/tmp/locked': Permission denied\n"),
+		exitCode: 1,
+	}
+
+	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
+	assert.True(t, resp.OK)
+	listing, ok := resp.Data.(protocol.DirListing)
+	require.True(t, ok)
+	assert.Equal(t, 1, len(listing.Entries))
+}
+
 func TestHandlePs(t *testing.T) {
 	h, mock := newTestHandler()
 	result, _ := json.Marshal(protocol.ProcessList{

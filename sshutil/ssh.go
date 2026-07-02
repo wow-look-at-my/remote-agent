@@ -1,6 +1,7 @@
 package sshutil
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -223,24 +224,73 @@ func buildAuthMethods() ([]ssh.AuthMethod, string, error) {
 	return methods, fingerprint, nil
 }
 
+// buildHostKeyCallback returns a host-key callback with OpenSSH
+// "accept-new" semantics (true trust-on-first-use): a host already in
+// ~/.ssh/known_hosts must present the recorded key (a mismatch fails the
+// connection), while a host never seen before is accepted once and its key is
+// recorded so every later connection detects substitution.
+//
+// Previously an absent known_hosts file disabled verification entirely and
+// permanently (InsecureIgnoreHostKey), and a present known_hosts file made
+// connections to any new host fail outright.
 func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home dir: %w", err)
 	}
 
-	knownHostsFile := filepath.Join(home, ".ssh", "known_hosts")
+	sshDir := filepath.Join(home, ".ssh")
+	knownHostsFile := filepath.Join(sshDir, "known_hosts")
 	if _, err := os.Stat(knownHostsFile); os.IsNotExist(err) {
-		// If no known_hosts file, warn but allow connections
-		// This is safer than InsecureIgnoreHostKey but allows first-time use
-		return ssh.InsecureIgnoreHostKey(), nil
+		// Create an empty file so knownhosts.New works and first-use keys
+		// have somewhere to be recorded.
+		if err := os.MkdirAll(sshDir, 0700); err != nil {
+			return nil, fmt.Errorf("create %s: %w", sshDir, err)
+		}
+		f, err := os.OpenFile(knownHostsFile, os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			return nil, fmt.Errorf("create %s: %w", knownHostsFile, err)
+		}
+		f.Close()
 	}
 
-	callback, err := knownhosts.New(knownHostsFile)
+	verify, err := knownhosts.New(knownHostsFile)
 	if err != nil {
 		return nil, fmt.Errorf("parse known_hosts: %w", err)
 	}
-	return callback, nil
+
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := verify(hostname, remote, key)
+		if err == nil {
+			return nil
+		}
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+			// Unknown host: first use. Record the key so later connections
+			// verify it, and tell the user what was trusted.
+			if aerr := appendKnownHost(knownHostsFile, hostname, key); aerr != nil {
+				return fmt.Errorf("record host key for %s: %w", hostname, aerr)
+			}
+			fmt.Fprintf(os.Stderr,
+				"Warning: unknown host %s; trusting on first use and recording key %s in %s\n",
+				hostname, ssh.FingerprintSHA256(key), knownHostsFile)
+			return nil
+		}
+		// Key mismatch (or unreadable file): hard failure.
+		return err
+	}, nil
+}
+
+// appendKnownHost appends a known_hosts entry for hostname with the given key.
+func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+	_, err = fmt.Fprintln(f, line)
+	return err
 }
 
 // keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.

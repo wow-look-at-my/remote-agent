@@ -305,6 +305,64 @@ func TestBuildHostKeyCallbackNoKnownHosts(t *testing.T) {
 
 }
 
+// fakeAddr is a minimal net.Addr for host-key callback tests.
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "tcp" }
+func (a fakeAddr) String() string  { return string(a) }
+
+func TestHostKeyTOFURecordsAndThenVerifies(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	keyA := generateTestKey(t).PublicKey()
+	keyB := generateTestKey(t).PublicKey()
+	addr := fakeAddr("192.0.2.10:2222")
+
+	// First contact: no known_hosts at all. The key must be accepted and
+	// recorded (OpenSSH accept-new semantics).
+	callback, err := buildHostKeyCallback()
+	require.Nil(t, err)
+	require.Nil(t, callback("192.0.2.10:2222", addr, keyA))
+
+	data, err := os.ReadFile(filepath.Join(home, ".ssh", "known_hosts"))
+	require.Nil(t, err)
+	assert.Contains(t, string(data), "[192.0.2.10]:2222")
+
+	// Rebuild the callback (fresh process): the recorded key must verify...
+	callback, err = buildHostKeyCallback()
+	require.Nil(t, err)
+	assert.Nil(t, callback("192.0.2.10:2222", addr, keyA))
+
+	// ...and a different key for the same host must be rejected, which is
+	// the entire point of recording it.
+	assert.NotNil(t, callback("192.0.2.10:2222", addr, keyB))
+}
+
+func TestHostKeyUnknownHostAddedAlongsideExistingEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sshDir := filepath.Join(home, ".ssh")
+	require.Nil(t, os.MkdirAll(sshDir, 0700))
+
+	// Pre-existing known_hosts with some other host.
+	existing := generateTestKey(t).PublicKey()
+	line := fmt.Sprintf("known.example.com %s", string(ssh.MarshalAuthorizedKey(existing)))
+	require.Nil(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte(line), 0600))
+
+	// A brand-new host used to fail outright when known_hosts existed; now it
+	// is trusted on first use and recorded.
+	callback, err := buildHostKeyCallback()
+	require.Nil(t, err)
+	newKey := generateTestKey(t).PublicKey()
+	assert.Nil(t, callback("fresh.example.com:22", fakeAddr("198.51.100.7:22"), newKey))
+
+	data, err := os.ReadFile(filepath.Join(sshDir, "known_hosts"))
+	require.Nil(t, err)
+	assert.Contains(t, string(data), "known.example.com")
+	assert.Contains(t, string(data), "fresh.example.com")
+}
+
 func TestBuildHostKeyCallbackWithKnownHosts(t *testing.T) {
 	home := t.TempDir()
 	sshDir := filepath.Join(home, ".ssh")

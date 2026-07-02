@@ -115,8 +115,10 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   `os.Exit` during `disconnect`.
 - `exec ls [path]` is rewritten to the structured `ls` handler; `ls` with other
   flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`).
-- Host-key verification is trust-on-first-use when `~/.ssh/known_hosts` is absent
-  (`sshutil/ssh.go`); the fingerprint is printed on connect so it can be verified.
+- Host-key verification has OpenSSH `accept-new` semantics (`sshutil/ssh.go`):
+  an unknown host is trusted on first use and its key recorded in
+  `~/.ssh/known_hosts`; a recorded host must present the same key or the
+  connection fails. The fingerprint is printed on connect for verification.
 - `client.Exec` returns `(exitCode, err)`: `err` is a transport/daemon failure,
   while a non-zero remote exit is reported via `exitCode`. `cmd/exec.go` mirrors
   that code as the process exit code (via the `osExit` test seam), so callers like

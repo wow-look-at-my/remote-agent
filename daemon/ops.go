@@ -303,17 +303,28 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	// `stat --format` is not. The non-recursive case just caps depth at 1.
 	var cmd string
 	if recursive {
-		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
+		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
 	} else {
-		cmd = fmt.Sprintf("find %s -maxdepth 1 -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
+		cmd = fmt.Sprintf("find %s -maxdepth 1 -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
 	}
 
-	stdout, _, _, err := h.daemon.runner.Run(cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("ls failed: %w", err))
 	}
 
 	entries := parseFindOutput(string(stdout))
+	// find exits non-zero on errors like a missing directory. A partial
+	// listing (e.g. permission-denied subtrees during a recursive walk) still
+	// returns what was found, but a failure with no entries at all used to be
+	// silently reported as an empty directory — surface the error instead.
+	if exitCode != 0 && len(entries) == 0 {
+		msg := strings.TrimSpace(string(stderr))
+		if msg == "" {
+			msg = fmt.Sprintf("find exited %d", exitCode)
+		}
+		return errResponse(fmt.Errorf("ls %s: %s", path, msg))
+	}
 	return okResponse(protocol.DirListing{Path: path, Entries: entries})
 }
 
