@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -60,8 +59,7 @@ func TestHandleDispatchExec(t *testing.T) {
 
 func TestHandleDispatchRead(t *testing.T) {
 	mock := newMockRunner()
-	encoded := base64.StdEncoding.EncodeToString([]byte("content"))
-	mock.onCommand("base64 '/etc/hostname'", []byte(encoded), 0)
+	mock.onCommand("cat '/etc/hostname'", []byte("content"), 0)
 	h := &Handler{daemon: &Daemon{runner: mock, remotePath: "/tmp/.remote-agent-test"}}
 
 	resp := h.Handle(&protocol.DaemonRequest{

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
 // mockRunner records commands and returns configured responses. It is safe
@@ -141,12 +142,33 @@ func TestHandleExecWithNonZeroExit(t *testing.T) {
 
 func TestHandleRead(t *testing.T) {
 	h, mock := newTestHandler()
-	content := "hello world"
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	mock.onCommand("base64 '/etc/hostname'", []byte(encoded+"\n"), 0)
+	mock.onCommand("cat '/etc/hostname'", []byte("hello world"), 0)
 
 	resp := h.handleRead(map[string]any{"path": "/etc/hostname"})
 	assert.True(t, resp.OK)
+
+	info, ok := resp.Data.(protocol.FileInfo)
+	assert.True(t, ok, "expected FileInfo, got %T", resp.Data)
+	assert.Equal(t, "hello world", info.Content)
+	assert.Equal(t, "", info.ContentB64, "text content must not be base64-framed")
+	assert.Equal(t, int64(11), info.Size)
+}
+
+func TestHandleReadBinaryContent(t *testing.T) {
+	h, mock := newTestHandler()
+	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80} // not valid UTF-8
+	mock.onCommand("cat '/bin/blob'", binary, 0)
+
+	resp := h.handleRead(map[string]any{"path": "/bin/blob"})
+	assert.True(t, resp.OK)
+
+	info, ok := resp.Data.(protocol.FileInfo)
+	assert.True(t, ok, "expected FileInfo, got %T", resp.Data)
+	assert.Equal(t, "", info.Content)
+	decoded, err := base64.StdEncoding.DecodeString(info.ContentB64)
+	assert.Nil(t, err)
+	assert.Equal(t, binary, decoded, "binary bytes must survive the JSON hop exactly")
+	assert.Equal(t, int64(len(binary)), info.Size)
 }
 
 func TestHandleReadMissingPath(t *testing.T) {
@@ -157,7 +179,7 @@ func TestHandleReadMissingPath(t *testing.T) {
 
 func TestHandleReadNotFound(t *testing.T) {
 	h, mock := newTestHandler()
-	mock.onCommandErr("base64 '/nonexistent'", []byte("No such file"), 1)
+	mock.onCommandErr("cat '/nonexistent'", []byte("No such file"), 1)
 
 	resp := h.handleRead(map[string]any{"path": "/nonexistent"})
 	assert.False(t, resp.OK)
@@ -165,7 +187,7 @@ func TestHandleReadNotFound(t *testing.T) {
 
 func TestHandleReadFail(t *testing.T) {
 	h, mock := newTestHandler()
-	mock.onCommandFail("base64 '/test'", fmt.Errorf("connection error"))
+	mock.onCommandFail("cat '/test'", fmt.Errorf("connection error"))
 
 	resp := h.handleRead(map[string]any{"path": "/test"})
 	assert.False(t, resp.OK)

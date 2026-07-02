@@ -20,10 +20,14 @@ type ExecResult struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-// FileInfo is returned by the read action.
+// FileInfo is returned by the read action. Exactly one of Content and
+// ContentB64 is set: Content carries valid-UTF-8 file bytes as-is, while
+// ContentB64 carries any other (binary) file base64-encoded, because JSON
+// strings cannot transport invalid UTF-8 without corruption.
 type FileInfo struct {
-	Content string `json:"content"`
-	Size    int64  `json:"size"`
+	Content    string `json:"content,omitempty"`
+	ContentB64 string `json:"content_b64,omitempty"`
+	Size       int64  `json:"size"`
 }
 
 // WriteResult is returned by write/upload actions.

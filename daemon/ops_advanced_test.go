@@ -157,13 +157,16 @@ func TestHandleDisconnect(t *testing.T) {
 	<-done
 }
 
-func TestHandleReadBadBase64(t *testing.T) {
+func TestHandleReadEmptyFile(t *testing.T) {
 	h, mock := newTestHandler()
-	mock.onCommand("base64 '/test'", []byte("not-valid-base64!!!"), 0)
+	mock.onCommand("cat '/tmp/empty'", []byte{}, 0)
 
-	resp := h.handleRead(map[string]any{"path": "/test"})
-	assert.False(t, resp.OK)
+	resp := h.handleRead(map[string]any{"path": "/tmp/empty"})
+	assert.True(t, resp.OK)
 
+	info, ok := resp.Data.(protocol.FileInfo)
+	assert.True(t, ok)
+	assert.Equal(t, int64(0), info.Size)
 }
 
 func TestHandleWriteDefaultMode(t *testing.T) {

@@ -106,8 +106,9 @@ A daemon started by this command is stopped again when claude exits; pass
 
 - The **client** sends a JSON request over a per-target Unix socket.
 - The **daemon** (`remote-agent connect`) keeps a single SSH connection open and
-  runs each request, serializing access behind a mutex. File transfers are
-  base64-framed for binary safety.
+  runs each request, serializing access behind a mutex. File contents stream as
+  raw bytes over the SSH channel; only non-UTF-8 payloads are base64-framed, and
+  only across the local JSON socket hop.
 - A copy of the binary is **deployed to the remote** and invoked as a hidden
   `serve` subcommand for operations that need structured output there (`sysinfo`,
   `ps`, `edit`), with start/stop/action **audit logging** to the remote's syslog.

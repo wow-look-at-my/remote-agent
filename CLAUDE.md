@@ -89,8 +89,11 @@ remote binary, removes the socket/PID files, and exits.
   `_windows`), not `runtime.GOOS` branches inside a shared file.
 - **Modern Go (1.24)**: prefer `any` over `interface{}`, `strings.Cut` for two-way
   splits, `math/rand/v2`, and `os.Getpagesize()` over a hardcoded page size.
-- **Remote file I/O** is base64-framed over the SSH channel to stay binary-safe;
-  shell arguments are quoted with `shellEscape` (`daemon/daemon.go`).
+- **Remote file I/O** streams raw bytes over the SSH channel (stdin for writes,
+  stdout for reads — the channel is binary-safe). Only the local JSON socket hop
+  base64-frames non-UTF-8 payloads (`content_b64` in `read`/`write`), because
+  JSON strings cannot carry invalid UTF-8. Shell arguments are quoted with
+  `shellEscape` (`daemon/daemon.go`).
 - **Errors** wrap with `%w`; handlers return `errResponse(err)` / `okResponse(data)`
   (`daemon/handler.go`).
 

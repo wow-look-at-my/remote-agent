@@ -150,6 +150,16 @@ func printExecText(m map[string]any) error {
 }
 
 func printReadText(m map[string]any) error {
+	// Binary files arrive base64-framed (JSON cannot carry invalid UTF-8);
+	// decode back to the exact original bytes.
+	if b64, _ := m["content_b64"].(string); b64 != "" {
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return fmt.Errorf("decode content_b64: %w", err)
+		}
+		_, err = os.Stdout.Write(data)
+		return err
+	}
 	content, _ := m["content"].(string)
 	fmt.Fprint(os.Stdout, content)
 	return nil

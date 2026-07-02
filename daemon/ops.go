@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
@@ -99,8 +100,10 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
-	// Use cat to read the file, base64 encode to avoid binary issues
-	cmd := fmt.Sprintf("base64 %s", shellEscape(path))
+	// cat the raw bytes: the SSH channel is binary-safe, so remote base64
+	// encoding (33% wire inflation plus an extra remote process) is wasted
+	// work, and it kept read from working on remotes without a base64 binary.
+	cmd := fmt.Sprintf("cat %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("read failed: %w", err))
@@ -109,16 +112,16 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("read %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
-	// Decode base64 to get actual content
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(stdout)))
-	if err != nil {
-		return errResponse(fmt.Errorf("decode file content: %w", err))
+	info := protocol.FileInfo{Size: int64(len(stdout))}
+	// JSON strings cannot carry invalid UTF-8 (encoding/json substitutes
+	// U+FFFD), so binary content is base64-framed across the socket hop and
+	// decoded again by the client. Text stays human-readable in --json.
+	if utf8.Valid(stdout) {
+		info.Content = string(stdout)
+	} else {
+		info.ContentB64 = base64.StdEncoding.EncodeToString(stdout)
 	}
-
-	return okResponse(protocol.FileInfo{
-		Content: string(decoded),
-		Size:    int64(len(decoded)),
-	})
+	return okResponse(info)
 }
 
 func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
