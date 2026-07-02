@@ -55,19 +55,6 @@ func (d *Daemon) auditAsync(action, detail string) {
 	}()
 }
 
-// sshRunner implements Runner using a real SSH client.
-type sshRunner struct {
-	client *ssh.Client
-}
-
-func (r *sshRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
-	return sshutil.RunCommand(r.client, command)
-}
-
-func (r *sshRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
-	return sshutil.RunCommandWithStdin(r.client, command, stdin)
-}
-
 // SocketPath returns the Unix socket path for a given host.
 func SocketPath(target string) string {
 	h := sha256.Sum256([]byte(target))
@@ -130,7 +117,9 @@ func Start(target string, port int) error {
 
 	fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
 
-	runner := &sshRunner{client: conn.Client}
+	// The runner keeps spare SSH sessions pre-opened so each command skips
+	// the channel-open round trip.
+	runner := sshutil.NewCommandRunner(conn.Client)
 
 	// Run startup audit
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s",

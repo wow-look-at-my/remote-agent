@@ -183,11 +183,15 @@ func newBenchDaemon(tb testing.TB, addr string) (*Handler, func()) {
 	client, err := ssh.Dial("tcp", addr, config)
 	require.NoError(tb, err)
 
+	runner := sshutil.NewCommandRunner(client)
 	d := &Daemon{
-		runner:     &sshRunner{client: client},
+		runner:     runner,
 		remotePath: benchRemotePath,
 	}
-	return &Handler{daemon: d}, func() { client.Close() }
+	return &Handler{daemon: d}, func() {
+		runner.Close()
+		client.Close()
+	}
 }
 
 // TestHandleExecOverRealSSH asserts stdout and exit code survive the real SSH

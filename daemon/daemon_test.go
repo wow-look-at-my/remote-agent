@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
 
 func TestSocketPath(t *testing.T) {
@@ -256,8 +257,8 @@ func TestFindDeployBinary(t *testing.T) {
 }
 
 func TestSshRunner(t *testing.T) {
-	// Verify the sshRunner struct implements Runner
-	var _ Runner = (*sshRunner)(nil)
+	// Verify sshutil.CommandRunner satisfies the daemon's Runner seam.
+	var _ Runner = (*sshutil.CommandRunner)(nil)
 }
 
 // startPingListener stands up a Unix socket that accepts one connection and
