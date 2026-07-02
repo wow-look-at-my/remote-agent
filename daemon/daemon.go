@@ -34,9 +34,30 @@ type Daemon struct {
 	sockPath     string
 	pidPath      string
 	listener     net.Listener
-	mu           sync.Mutex     // serialize SSH session access; also guards lastActivity
-	lastActivity time.Time      // time of the last client request (guarded by mu)
+	mu           sync.Mutex     // guards lastActivity and activeOps
+	lastActivity time.Time      // time of the last client request start/finish (guarded by mu)
+	activeOps    int            // number of requests currently being handled (guarded by mu)
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
+}
+
+// opStart records that a client request began handling. The idle watchdog
+// never shuts the daemon down while operations are in flight, no matter how
+// long they run.
+func (d *Daemon) opStart() {
+	d.mu.Lock()
+	d.activeOps++
+	d.lastActivity = time.Now()
+	d.mu.Unlock()
+}
+
+// opEnd records that a client request finished. It also refreshes
+// lastActivity so the idle countdown starts at completion, not at the start
+// of a long-running command.
+func (d *Daemon) opEnd() {
+	d.mu.Lock()
+	d.activeOps--
+	d.lastActivity = time.Now()
+	d.mu.Unlock()
 }
 
 // auditAsync writes an audit entry on the remote without blocking the
@@ -208,34 +229,27 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		return
 	}
 
-	// Record activity so the idle watchdog doesn't shut us down mid-use. The
-	// handlers acquire mu themselves, so touchActivity takes and releases mu on
-	// its own before dispatch (no nested lock, no deadlock).
-	d.touchActivity()
+	// Track the request so the idle watchdog neither fires mid-operation nor
+	// counts a long-running command's duration as idle time.
+	d.opStart()
+	defer d.opEnd()
 
 	handler := &Handler{daemon: d}
 	resp := handler.Handle(&req)
 	encoder.Encode(resp)
 }
 
-// touchActivity records the time of the most recent client request. It is safe
-// to call without holding mu; it locks mu for the field write.
-func (d *Daemon) touchActivity() {
-	d.mu.Lock()
-	d.lastActivity = time.Now()
-	d.mu.Unlock()
-}
-
-// watchIdle shuts the daemon down once it has been idle for idleTimeout. It
-// fires at most once.
+// watchIdle shuts the daemon down once it has been idle for idleTimeout with
+// no operations in flight. It fires at most once.
 func (d *Daemon) watchIdle() {
 	ticker := time.NewTicker(idleCheckInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		d.mu.Lock()
 		idle := time.Since(d.lastActivity)
+		busy := d.activeOps > 0
 		d.mu.Unlock()
-		if idle > idleTimeout {
+		if !busy && idle > idleTimeout {
 			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
 			d.shutdown()
 			exitFunc(0)

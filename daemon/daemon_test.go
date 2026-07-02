@@ -308,12 +308,56 @@ func TestPingSocketStale(t *testing.T) {
 	assert.False(t, pingSocket(sockPath))
 }
 
-func TestTouchActivity(t *testing.T) {
+func TestOpStartEndTracksActivity(t *testing.T) {
 	d := &Daemon{}
 	assert.True(t, d.lastActivity.IsZero())
 
-	d.touchActivity()
+	d.opStart()
 	assert.False(t, d.lastActivity.IsZero())
+	assert.Equal(t, 1, d.activeOps)
+
+	d.opEnd()
+	assert.Equal(t, 0, d.activeOps)
+	assert.False(t, d.lastActivity.IsZero())
+}
+
+func TestWatchIdleWaitsForActiveOps(t *testing.T) {
+	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
+	defer func() {
+		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
+	}()
+
+	idleTimeout = 1 * time.Millisecond
+	idleCheckInterval = 5 * time.Millisecond
+
+	done := make(chan struct{})
+	var once sync.Once
+	exitFunc = func(code int) { once.Do(func() { close(done) }) }
+
+	d := &Daemon{
+		sockPath:     filepath.Join(t.TempDir(), "busy.sock"),
+		pidPath:      filepath.Join(t.TempDir(), "busy.pid"),
+		lastActivity: time.Now().Add(-1 * time.Hour), // long past the idle timeout
+	}
+	// Simulate a long-running command (e.g. a 40-minute build) in flight.
+	d.opStart()
+
+	go d.watchIdle()
+
+	select {
+	case <-done:
+		t.Fatal("watchIdle shut the daemon down while an operation was in flight")
+	case <-time.After(50 * time.Millisecond):
+		// good: several ticks passed without a shutdown
+	}
+
+	// Once the operation completes, the idle countdown restarts and may fire.
+	d.opEnd()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchIdle did not fire after the operation completed")
+	}
 }
 
 func TestWatchIdleShutdown(t *testing.T) {

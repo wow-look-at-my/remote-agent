@@ -18,9 +18,6 @@ type Runner interface {
 }
 
 func (h *Handler) handlePing() *protocol.DaemonResponse {
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	stdout, _, _, err := h.daemon.runner.Run("echo pong")
 	if err != nil {
 		return errResponse(fmt.Errorf("ping failed: %w", err))
@@ -41,9 +38,6 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 
 	// Strip pointless trailing 2>&1 — stderr is already captured separately
 	command = stripTrailingRedirect(command)
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Audit log the command (concurrently, on its own SSH channel).
 	h.daemon.auditAsync("exec", command)
@@ -97,9 +91,6 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	// cat the raw bytes: the SSH channel is binary-safe, so remote base64
 	// encoding (33% wire inflation plus an extra remote process) is wasted
 	// work, and it kept read from working on remotes without a base64 binary.
@@ -140,9 +131,6 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	if !validChmodMode(mode) {
 		return errResponse(fmt.Errorf("invalid mode %q: expected an octal mode like 0644", mode))
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Audit (concurrently, on its own SSH channel)
 	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(data)))
@@ -205,9 +193,6 @@ func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("read local file %s: %w", localPath, err))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	// Audit (concurrently, on its own SSH channel)
 	h.daemon.auditAsync("upload", fmt.Sprintf("path=%s size=%d", remotePath, len(data)))
 
@@ -230,9 +215,6 @@ func (h *Handler) handleDownload(params map[string]any) *protocol.DaemonResponse
 	if remotePath == "" || localPath == "" {
 		return errResponse(fmt.Errorf("missing 'remote_path' or 'local_path' parameter"))
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Read remote file via cat
 	cmd := fmt.Sprintf("cat %s", shellEscape(remotePath))
@@ -259,9 +241,6 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 	if path == "" || oldText == "" {
 		return errResponse(fmt.Errorf("missing 'path' or 'old' parameter"))
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
@@ -296,9 +275,6 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	if path == "" {
 		path = "."
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Use find for both modes; %y gives type (d/f/l), %l gives symlink target.
 	// find is present on BusyBox (and other minimal images) where GNU
@@ -368,9 +344,6 @@ func (h *Handler) handleReadlink(params map[string]any) *protocol.DaemonResponse
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	cmd := fmt.Sprintf("readlink -f %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
@@ -388,9 +361,6 @@ func (h *Handler) handleReadlink(params map[string]any) *protocol.DaemonResponse
 
 func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 	filter, _ := params["filter"].(string)
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Use remote helper for structured output
 	cmd := h.daemon.remotePath + " serve ps"
@@ -413,9 +383,6 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 }
 
 func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	// Use remote helper
 	cmd := h.daemon.remotePath + " serve sysinfo"
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)

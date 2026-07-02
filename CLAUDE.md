@@ -54,7 +54,9 @@ Three roles, one binary:
    Unix socket and prints the reply (compact text, or indented JSON with `--json`).
 2. **Local daemon** — `daemon/daemon.go`, started by `remote-agent connect`. Opens
    one SSH connection (`sshutil/`), deploys the binary to the remote, listens on
-   `/tmp/remote-agent-<sha>.sock`, and serializes all SSH use behind a mutex.
+   `/tmp/remote-agent-<sha>.sock`, and handles requests concurrently — each command
+   runs on its own multiplexed SSH channel via `sshutil.CommandRunner`, which
+   bounds in-flight commands and keeps spare sessions pre-opened.
    `daemon/handler.go` routes an action to a handler in `daemon/ops.go`.
 3. **Remote agent** — the same binary, copied to the remote and run as the hidden
    `serve` subcommand (`cmd/serve*.go` → `agent/`) for operations that need
@@ -65,10 +67,12 @@ Three roles, one binary:
 
 `connect` dials SSH, prints the host-key fingerprint, deploys
 `/tmp/.remote-agent-<rand>`, writes a startup audit entry, then listens. Each
-command: the client locates the socket → the daemon locks the mutex → runs either
-a plain shell command or `<remote-binary> serve <sub>` → returns a
-`protocol.DaemonResponse`. `disconnect` writes a shutdown audit entry, `rm`s the
-remote binary, removes the socket/PID files, and exits.
+command: the client locates the socket → the daemon runs either a plain shell
+command or `<remote-binary> serve <sub>` on its own SSH channel (the audit entry
+for exec/write/upload runs concurrently on another channel) → returns a
+`protocol.DaemonResponse`. The idle watchdog never fires while operations are in
+flight. `disconnect` drains pending audits, writes a shutdown audit entry, `rm`s
+the remote binary, removes the socket/PID files, and exits.
 
 ### Packages
 
@@ -78,7 +82,7 @@ remote binary, removes the socket/PID files, and exits.
 | `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim. |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`). |
 | `agent/` | Remote-side system/process/file collectors; platform files selected by build tag. |
-| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. |
+| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
 
 ## Conventions

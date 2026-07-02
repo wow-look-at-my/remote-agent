@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -322,6 +323,58 @@ func TestHandleExecAudit(t *testing.T) {
 		}
 	}
 	assert.True(t, auditSeen, "expected an exec audit entry, got %v", calls)
+}
+
+// barrierRunner blocks every non-audit command until release is closed, and
+// reports arrivals, so a test can prove two commands run concurrently.
+type barrierRunner struct {
+	arrived chan string
+	release chan struct{}
+}
+
+func (r *barrierRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	if strings.Contains(command, "serve audit") {
+		return nil, nil, 0, nil
+	}
+	r.arrived <- command
+	<-r.release
+	return []byte("done\n"), nil, 0, nil
+}
+
+func (r *barrierRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
+// TestConcurrentExecsDoNotSerialize proves two execs progress simultaneously:
+// both must be inside Run before either is released. Under the old global
+// mutex the second exec could not start until the first finished, and this
+// test would fail at the two-arrivals barrier.
+func TestConcurrentExecsDoNotSerialize(t *testing.T) {
+	runner := &barrierRunner{
+		arrived: make(chan string, 2),
+		release: make(chan struct{}),
+	}
+	d := &Daemon{runner: runner, remotePath: "/tmp/.remote-agent-test"}
+	h := &Handler{daemon: d}
+
+	results := make(chan *protocol.DaemonResponse, 2)
+	go func() { results <- h.handleExec(map[string]any{"command": "first"}) }()
+	go func() { results <- h.handleExec(map[string]any{"command": "second"}) }()
+
+	for i := range 2 {
+		select {
+		case <-runner.arrived:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 2 execs started; operations are serialized", i)
+		}
+	}
+	close(runner.release)
+
+	for range 2 {
+		resp := <-results
+		assert.True(t, resp.OK)
+	}
+	d.auditWG.Wait()
 }
 
 // --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---

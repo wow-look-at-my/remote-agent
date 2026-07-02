@@ -13,6 +13,11 @@ import (
 // the command itself and one for its concurrent audit write.
 const spareTarget = 2
 
+// maxConcurrentSessions bounds how many commands run at once. Together with
+// the spare pool this stays within OpenSSH's default MaxSessions of 10
+// channels per connection (8 running + 2 spares).
+const maxConcurrentSessions = 8
+
 // CommandRunner executes commands over a persistent SSH connection. It keeps
 // a small pool of pre-opened sessions warm: opening a session costs a full
 // network round trip (SSH_MSG_CHANNEL_OPEN -> CONFIRMATION), so opening the
@@ -20,6 +25,7 @@ const spareTarget = 2
 // round trip from every command's latency.
 type CommandRunner struct {
 	client  *ssh.Client
+	sem     chan struct{} // bounds concurrently running commands
 	mu      sync.Mutex
 	spares  []*ssh.Session // pre-opened sessions ready for the next commands
 	warming bool           // a prewarm goroutine is in flight
@@ -27,9 +33,14 @@ type CommandRunner struct {
 }
 
 // NewCommandRunner returns a runner for the given SSH client and starts
-// pre-opening sessions immediately.
+// pre-opening sessions immediately. Run and RunStdin are safe for concurrent
+// use: SSH multiplexes each command onto its own channel, and the runner
+// bounds in-flight commands at maxConcurrentSessions.
 func NewCommandRunner(client *ssh.Client) *CommandRunner {
-	r := &CommandRunner{client: client}
+	r := &CommandRunner{
+		client: client,
+		sem:    make(chan struct{}, maxConcurrentSessions),
+	}
 	r.prewarmAsync()
 	return r
 }
@@ -48,6 +59,9 @@ func (r *CommandRunner) RunStdin(command string, stdin []byte) (stdout, stderr [
 }
 
 func (r *CommandRunner) run(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	r.sem <- struct{}{}
+	defer func() { <-r.sem }()
+
 	sess, fromSpare, err := r.takeSession()
 	if err != nil {
 		return nil, nil, -1, err
