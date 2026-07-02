@@ -123,26 +123,33 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 
 func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	path, _ := params["path"].(string)
-	content, _ := params["content"].(string)
 	mode, _ := params["mode"].(string)
 	if path == "" {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
+	data, err := contentParam(params)
+	if err != nil {
+		return errResponse(err)
+	}
 	if mode == "" {
 		mode = "0644"
+	}
+	if !validChmodMode(mode) {
+		return errResponse(fmt.Errorf("invalid mode %q: expected an octal mode like 0644", mode))
 	}
 
 	h.daemon.mu.Lock()
 	defer h.daemon.mu.Unlock()
 
 	// Audit (concurrently, on its own SSH channel)
-	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(content)))
+	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(data)))
 
-	// Write via cat, using base64 to avoid binary issues
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := fmt.Sprintf("echo %s | base64 -d > %s && chmod %s %s",
-		shellEscape(encoded), shellEscape(path), mode, shellEscape(path))
-	_, stderr, exitCode, err := h.daemon.runner.Run(cmd)
+	// Stream the content over stdin. The SSH channel is binary-safe, and
+	// unlike the previous echo-base64-in-the-command-line approach this is
+	// immune to the kernel's per-argument size cap (MAX_ARG_STRLEN, 128 KiB),
+	// which made every write over ~96 KiB fail with "Argument list too long".
+	cmd := fmt.Sprintf("cat > %s && chmod %s %s", shellEscape(path), mode, shellEscape(path))
+	_, stderr, exitCode, err := h.daemon.runner.RunStdin(cmd, data)
 	if err != nil {
 		return errResponse(fmt.Errorf("write failed: %w", err))
 	}
@@ -150,7 +157,36 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("write %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
-	return okResponse(protocol.WriteResult{BytesWritten: int64(len(content))})
+	return okResponse(protocol.WriteResult{BytesWritten: int64(len(data))})
+}
+
+// contentParam extracts a write payload from request params. content_b64
+// (base64, binary-safe across the JSON socket hop) is preferred; the plain
+// content string is the fallback used for valid-UTF-8 payloads.
+func contentParam(params map[string]any) ([]byte, error) {
+	if b64, ok := params["content_b64"].(string); ok && b64 != "" {
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("decode content_b64: %w", err)
+		}
+		return data, nil
+	}
+	content, _ := params["content"].(string)
+	return []byte(content), nil
+}
+
+// validChmodMode reports whether mode is a plain octal chmod mode (like 644
+// or 0755), the only form handleWrite splices into the remote shell command.
+func validChmodMode(mode string) bool {
+	if len(mode) < 3 || len(mode) > 4 {
+		return false
+	}
+	for _, c := range mode {
+		if c < '0' || c > '7' {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {

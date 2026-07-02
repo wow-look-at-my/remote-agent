@@ -87,7 +87,7 @@ A daemon started by this command is stopped again when claude exits; pass
 | `exec <command...>` | Run a shell command on the remote. |
 | `ls [path]` | List a remote directory. `--recursive` walks subdirectories. |
 | `read <path>` | Print a remote file (binary-safe). |
-| `write <path>` | Write stdin to a remote file. `--mode` sets permissions (default 0644). |
+| `write <path>` | Write stdin to a remote file (binary-safe, any size). `--mode` sets permissions (octal, default 0644). |
 | `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`. |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |

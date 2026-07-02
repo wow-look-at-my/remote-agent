@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -192,6 +193,69 @@ func TestHandleWriteError(t *testing.T) {
 
 	resp := h.handleWrite(map[string]any{"path": "/root/test.txt", "content": "x"})
 	assert.False(t, resp.OK)
+}
+
+func TestHandleWriteStreamsViaStdin(t *testing.T) {
+	h, mock := newTestHandler()
+	// 300 KiB payload: embedding this in the command line (as the old
+	// echo|base64 -d approach did) exceeds the kernel's 128 KiB per-argument
+	// cap (MAX_ARG_STRLEN) and fails with "Argument list too long".
+	content := strings.Repeat("x", 300*1024)
+
+	resp := h.handleWrite(map[string]any{"path": "/tmp/big.bin", "content": content})
+	assert.True(t, resp.OK)
+
+	found := false
+	for _, c := range mock.snapshotCalls() {
+		if strings.HasPrefix(c.Command, "cat > '/tmp/big.bin'") {
+			found = true
+			assert.Equal(t, []byte(content), c.Stdin, "content must stream via stdin")
+			assert.Less(t, len(c.Command), 1024, "content must not be embedded in the command line")
+		}
+	}
+	assert.True(t, found, "expected a cat > write command")
+}
+
+func TestHandleWriteContentB64Binary(t *testing.T) {
+	h, mock := newTestHandler()
+	binary := []byte{0x00, 0xff, 0xfe, 'a', 0x80, 0x01} // invalid UTF-8
+	resp := h.handleWrite(map[string]any{
+		"path":        "/tmp/blob",
+		"content_b64": base64.StdEncoding.EncodeToString(binary),
+	})
+	assert.True(t, resp.OK)
+
+	found := false
+	for _, c := range mock.snapshotCalls() {
+		if strings.HasPrefix(c.Command, "cat > '/tmp/blob'") {
+			found = true
+			assert.Equal(t, binary, c.Stdin, "binary bytes must reach the remote unmodified")
+		}
+	}
+	assert.True(t, found, "expected a cat > write command")
+}
+
+func TestHandleWriteBadContentB64(t *testing.T) {
+	h, _ := newTestHandler()
+	resp := h.handleWrite(map[string]any{"path": "/tmp/x", "content_b64": "!!!not-base64!!!"})
+	assert.False(t, resp.OK)
+}
+
+func TestHandleWriteRejectsNonOctalMode(t *testing.T) {
+	h, _ := newTestHandler()
+	for _, mode := range []string{"u+x", "rwxr-xr-x", "755; rm -rf /", "99", "07555 ", "0x644"} {
+		resp := h.handleWrite(map[string]any{"path": "/tmp/x", "content": "hi", "mode": mode})
+		assert.False(t, resp.OK, "mode %q must be rejected", mode)
+	}
+}
+
+func TestValidChmodMode(t *testing.T) {
+	for _, ok := range []string{"644", "0644", "755", "4755", "777"} {
+		assert.True(t, validChmodMode(ok), "mode %q should be accepted", ok)
+	}
+	for _, bad := range []string{"", "6", "64", "07777", "abc", "u+x", "6 4"} {
+		assert.False(t, validChmodMode(bad), "mode %q should be rejected", bad)
+	}
 }
 
 func TestHandleUpload(t *testing.T) {
