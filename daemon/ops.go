@@ -53,36 +53,58 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	})
 }
 
-// parseLsCommand checks if a command is a simple "ls [path]" and returns
-// the path and whether it's recursive. Returns ok=false for complex ls
-// invocations with unsupported flags.
+// parseLsCommand checks if a command is a simple "ls [path]" that the native
+// ls handler can answer faithfully, returning the path and whether it is
+// recursive. Anything the structured handler cannot reproduce falls through
+// to real exec (ok=false): unsupported flags, multiple paths, and — crucially
+// — paths with characters the shell would transform. The handler quotes the
+// path literally, so rewriting "ls *.go" would search for a file literally
+// named "*.go", find nothing, and silently print an empty listing.
 func parseLsCommand(command string) (path string, recursive bool, ok bool) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 || parts[0] != "ls" {
 		return "", false, false
 	}
 	path = "."
+	seenPath := false
 	for _, p := range parts[1:] {
-		if p == "-R" {
+		switch {
+		case p == "-R":
 			recursive = true
-		} else if strings.HasPrefix(p, "-") {
+		case strings.HasPrefix(p, "-"):
 			// Has flags we don't support natively — let exec handle it
 			return "", false, false
-		} else {
+		case seenPath || !plainLsPath(p):
+			return "", false, false
+		default:
 			path = p
+			seenPath = true
 		}
 	}
 	return path, recursive, true
 }
 
-// stripTrailingRedirect removes a trailing "2>&1" from commands since
-// stderr is already captured separately by the SSH transport.
+// plainLsPath reports whether p is a literal path with no characters the
+// shell (globbing, expansion, quoting, escaping, operators) would transform.
+func plainLsPath(p string) bool {
+	return !strings.ContainsAny(p, "*?[]{}~$`\"'\\!()<>|&;#")
+}
+
+// stripTrailingRedirect removes a trailing "2>&1" from commands since stderr
+// is already captured separately by the SSH transport. It leaves the command
+// untouched when any other '>' redirect is present: in "cmd > log 2>&1" the
+// trailing redirect sends stderr into the log file, and stripping it would
+// change what lands in the file.
 func stripTrailingRedirect(command string) string {
 	trimmed := strings.TrimSpace(command)
-	if strings.HasSuffix(trimmed, "2>&1") {
-		return strings.TrimSpace(trimmed[:len(trimmed)-4])
+	if !strings.HasSuffix(trimmed, "2>&1") {
+		return command
 	}
-	return command
+	rest := strings.TrimSpace(trimmed[:len(trimmed)-4])
+	if strings.Contains(rest, ">") {
+		return command
+	}
+	return rest
 }
 
 func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {

@@ -396,6 +396,22 @@ func TestParseLsCommand(t *testing.T) {
 		{"cat /etc/passwd", "", false, false}, // not ls
 		{"", "", false, false},
 		{"lsof", "", false, false}, // not ls
+		// Shell-transformed arguments must fall through to real exec: the
+		// native handler quotes the path literally, so globs/expansions would
+		// silently return an empty listing instead of matching files.
+		{"ls *.go", "", false, false},
+		{"ls /tmp/*.log", "", false, false},
+		{"ls ?", "", false, false},
+		{"ls [ab]", "", false, false},
+		{"ls ~", "", false, false},
+		{"ls $HOME", "", false, false},
+		{"ls 'a b'", "", false, false},
+		{`ls "a b"`, "", false, false},
+		{`ls a\ b`, "", false, false},
+		{"ls a b", "", false, false}, // multiple paths: all but the last were dropped
+		{"ls /tmp; whoami", "", false, false},
+		{"ls `pwd`", "", false, false},
+		{"ls /tmp | wc -l", "", false, false},
 	}
 	for _, tt := range tests {
 		path, recursive, ok := parseLsCommand(tt.cmd)
@@ -418,6 +434,12 @@ func TestStripTrailingRedirect(t *testing.T) {
 		{"echo 2>&1 hello", "echo 2>&1 hello"}, // not trailing
 		{"2>&1", ""},
 		{"cmd", "cmd"},
+		// With another '>' redirect present, 2>&1 changes what lands in the
+		// file — stripping it would drop stderr from the log. Leave as-is.
+		{"make > build.log 2>&1", "make > build.log 2>&1"},
+		{"make >> build.log 2>&1", "make >> build.log 2>&1"},
+		{"a 2>&1 | b 2>&1", "a 2>&1 | b 2>&1"}, // inner 2>&1 contains '>'
+		{"cmd < input 2>&1", "cmd < input"},    // '<' is unaffected by the strip
 	}
 	for _, tt := range tests {
 		got := stripTrailingRedirect(tt.input)
