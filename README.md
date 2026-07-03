@@ -43,7 +43,7 @@ remote-agent upload ./local.txt /tmp/remote.txt
 remote-agent download /tmp/remote.txt ./local.txt
 remote-agent readlink /usr/bin/python
 
-# 3. Disconnect — stops the daemon and removes the remote helper
+# 3. Disconnect — stops the daemon (the helper stays cached for fast reconnects)
 remote-agent disconnect
 ```
 
@@ -82,12 +82,12 @@ A daemon started by this command is stopped again when claude exits; pass
 |---------|-------------|
 | `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
 | `claude [user@host]` | Launch Claude Code with its Bash shell wired to run on the remote. `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
-| `disconnect` | Stop the daemon and remove the remote helper. |
+| `disconnect` | Stop the daemon. The helper binary stays cached in `~/.cache/remote-agent` on the remote, so the next connect skips the upload. |
 | `ping` | Check that the daemon and remote are alive. |
 | `exec <command...>` | Run a shell command on the remote. |
 | `ls [path]` | List a remote directory. `--recursive` walks subdirectories. |
 | `read <path>` | Print a remote file (binary-safe). |
-| `write <path>` | Write stdin to a remote file. `--mode` sets permissions (default 0644). |
+| `write <path>` | Write stdin to a remote file (binary-safe, any size). `--mode` sets permissions (octal, default 0644). |
 | `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`. |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
@@ -106,15 +106,21 @@ A daemon started by this command is stopped again when claude exits; pass
 
 - The **client** sends a JSON request over a per-target Unix socket.
 - The **daemon** (`remote-agent connect`) keeps a single SSH connection open and
-  runs each request, serializing access behind a mutex. File transfers are
-  base64-framed for binary safety.
+  runs requests concurrently, multiplexing each command onto its own SSH channel
+  (bounded to stay within the server's per-connection session limit, with spare
+  sessions pre-opened to cut per-command latency). File contents stream as raw
+  bytes over the SSH channel; only non-UTF-8 payloads are base64-framed, and
+  only across the local JSON socket hop.
 - A copy of the binary is **deployed to the remote** and invoked as a hidden
   `serve` subcommand for operations that need structured output there (`sysinfo`,
   `ps`, `edit`), with start/stop/action **audit logging** to the remote's syslog.
+  The helper is content-addressed and cached in `~/.cache/remote-agent`, so
+  reconnects skip the multi-megabyte upload when the binary is unchanged.
 
-Authentication uses your SSH agent and `~/.ssh` keys. The host-key fingerprint is
-printed on connect; when there is no `known_hosts` entry, the first connection is
-trust-on-first-use, so verify the printed fingerprint.
+Authentication uses your SSH agent and `~/.ssh` keys. Host keys follow OpenSSH
+`accept-new` semantics: the first connection to an unknown host is trusted and its
+key recorded in `~/.ssh/known_hosts`, and every later connection must match the
+recorded key. The fingerprint is printed on connect — verify it on first contact.
 
 There is **one daemon per target host** (the socket path is derived from the
 target), so multiple terminals targeting the same host share a connection. When

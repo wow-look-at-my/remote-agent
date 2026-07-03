@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,6 +70,37 @@ func TestHandleLsRecursive(t *testing.T) {
 	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
 	assert.True(t, resp.OK)
 
+}
+
+func TestHandleLsMissingDirErrors(t *testing.T) {
+	h, mock := newTestHandler()
+	// A nonexistent path makes find fail with no output; this used to be
+	// silently reported as an empty directory listing.
+	mock.defaultResponse = mockResponse{
+		stderr:   []byte("find: '/nope': No such file or directory\n"),
+		exitCode: 1,
+	}
+
+	resp := h.handleLs(map[string]any{"path": "/nope"})
+	assert.False(t, resp.OK)
+	assert.Contains(t, resp.Error, "No such file or directory")
+}
+
+func TestHandleLsPartialListingStillSucceeds(t *testing.T) {
+	h, mock := newTestHandler()
+	// Recursive walks can fail on some subtrees (permission denied) while
+	// still finding entries; the partial listing must be returned.
+	mock.defaultResponse = mockResponse{
+		stdout:   []byte("f\t100\t644\t1709300000\t\t/tmp/a.txt\n"),
+		stderr:   []byte("find: '/tmp/locked': Permission denied\n"),
+		exitCode: 1,
+	}
+
+	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
+	assert.True(t, resp.OK)
+	listing, ok := resp.Data.(protocol.DirListing)
+	require.True(t, ok)
+	assert.Equal(t, 1, len(listing.Entries))
 }
 
 func TestHandlePs(t *testing.T) {
@@ -156,13 +189,16 @@ func TestHandleDisconnect(t *testing.T) {
 	<-done
 }
 
-func TestHandleReadBadBase64(t *testing.T) {
+func TestHandleReadEmptyFile(t *testing.T) {
 	h, mock := newTestHandler()
-	mock.onCommand("base64 '/test'", []byte("not-valid-base64!!!"), 0)
+	mock.onCommand("cat '/tmp/empty'", []byte{}, 0)
 
-	resp := h.handleRead(map[string]any{"path": "/test"})
-	assert.False(t, resp.OK)
+	resp := h.handleRead(map[string]any{"path": "/tmp/empty"})
+	assert.True(t, resp.OK)
 
+	info, ok := resp.Data.(protocol.FileInfo)
+	assert.True(t, ok)
+	assert.Equal(t, int64(0), info.Size)
 }
 
 func TestHandleWriteDefaultMode(t *testing.T) {
@@ -306,9 +342,70 @@ func TestHandleExecAudit(t *testing.T) {
 
 	resp := h.handleExec(map[string]any{"command": "whoami"})
 	assert.True(t, resp.OK)
-	assert.GreaterOrEqual(t, // Verify audit command was called before actual command
-		len(mock.calls), 2)
+	h.daemon.auditWG.Wait() // audits run async; drain before asserting
+	calls := mock.snapshotCalls()
+	assert.GreaterOrEqual(t, len(calls), 2) // audit + actual command both recorded
 
+	var auditSeen bool
+	for _, c := range calls {
+		if strings.Contains(c.Command, "serve audit --action 'exec'") &&
+			strings.Contains(c.Command, "whoami") {
+			auditSeen = true
+		}
+	}
+	assert.True(t, auditSeen, "expected an exec audit entry, got %v", calls)
+}
+
+// barrierRunner blocks every non-audit command until release is closed, and
+// reports arrivals, so a test can prove two commands run concurrently.
+type barrierRunner struct {
+	arrived chan string
+	release chan struct{}
+}
+
+func (r *barrierRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	if strings.Contains(command, "serve audit") {
+		return nil, nil, 0, nil
+	}
+	r.arrived <- command
+	<-r.release
+	return []byte("done\n"), nil, 0, nil
+}
+
+func (r *barrierRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
+// TestConcurrentExecsDoNotSerialize proves two execs progress simultaneously:
+// both must be inside Run before either is released. Under the old global
+// mutex the second exec could not start until the first finished, and this
+// test would fail at the two-arrivals barrier.
+func TestConcurrentExecsDoNotSerialize(t *testing.T) {
+	runner := &barrierRunner{
+		arrived: make(chan string, 2),
+		release: make(chan struct{}),
+	}
+	d := &Daemon{runner: runner, remotePath: "/tmp/.remote-agent-test"}
+	h := &Handler{daemon: d}
+
+	results := make(chan *protocol.DaemonResponse, 2)
+	go func() { results <- h.handleExec(map[string]any{"command": "first"}) }()
+	go func() { results <- h.handleExec(map[string]any{"command": "second"}) }()
+
+	for i := range 2 {
+		select {
+		case <-runner.arrived:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 2 execs started; operations are serialized", i)
+		}
+	}
+	close(runner.release)
+
+	for range 2 {
+		resp := <-results
+		assert.True(t, resp.OK)
+	}
+	d.auditWG.Wait()
 }
 
 // --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---
@@ -330,6 +427,22 @@ func TestParseLsCommand(t *testing.T) {
 		{"cat /etc/passwd", "", false, false}, // not ls
 		{"", "", false, false},
 		{"lsof", "", false, false}, // not ls
+		// Shell-transformed arguments must fall through to real exec: the
+		// native handler quotes the path literally, so globs/expansions would
+		// silently return an empty listing instead of matching files.
+		{"ls *.go", "", false, false},
+		{"ls /tmp/*.log", "", false, false},
+		{"ls ?", "", false, false},
+		{"ls [ab]", "", false, false},
+		{"ls ~", "", false, false},
+		{"ls $HOME", "", false, false},
+		{"ls 'a b'", "", false, false},
+		{`ls "a b"`, "", false, false},
+		{`ls a\ b`, "", false, false},
+		{"ls a b", "", false, false}, // multiple paths: all but the last were dropped
+		{"ls /tmp; whoami", "", false, false},
+		{"ls `pwd`", "", false, false},
+		{"ls /tmp | wc -l", "", false, false},
 	}
 	for _, tt := range tests {
 		path, recursive, ok := parseLsCommand(tt.cmd)
@@ -352,6 +465,12 @@ func TestStripTrailingRedirect(t *testing.T) {
 		{"echo 2>&1 hello", "echo 2>&1 hello"}, // not trailing
 		{"2>&1", ""},
 		{"cmd", "cmd"},
+		// With another '>' redirect present, 2>&1 changes what lands in the
+		// file — stripping it would drop stderr from the log. Leave as-is.
+		{"make > build.log 2>&1", "make > build.log 2>&1"},
+		{"make >> build.log 2>&1", "make >> build.log 2>&1"},
+		{"a 2>&1 | b 2>&1", "a 2>&1 | b 2>&1"}, // inner 2>&1 contains '>'
+		{"cmd < input 2>&1", "cmd < input"},    // '<' is unaffected by the strip
 	}
 	for _, tt := range tests {
 		got := stripTrailingRedirect(tt.input)

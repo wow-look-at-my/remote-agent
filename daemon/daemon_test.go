@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wow-look-at-my/remote-agent/protocol"
+	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
 
 func TestSocketPath(t *testing.T) {
@@ -139,6 +143,61 @@ func TestShutdownWithRunner(t *testing.T) {
 
 }
 
+// slowAuditRunner delays audit commands and records completion order, so the
+// test can prove shutdown drains in-flight async audits before proceeding.
+type slowAuditRunner struct {
+	mu        sync.Mutex
+	completed []string
+	delay     time.Duration
+}
+
+func (r *slowAuditRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
+	if strings.Contains(command, "serve audit --action 'exec'") {
+		time.Sleep(r.delay)
+	}
+	r.mu.Lock()
+	r.completed = append(r.completed, command)
+	r.mu.Unlock()
+	return nil, nil, 0, nil
+}
+
+func (r *slowAuditRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
+func TestShutdownDrainsPendingAudits(t *testing.T) {
+	runner := &slowAuditRunner{delay: 50 * time.Millisecond}
+	d := &Daemon{
+		runner:     runner,
+		remotePath: "/tmp/.remote-agent-test",
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+	}
+	h := &Handler{daemon: d}
+
+	resp := h.handleExec(map[string]any{"command": "whoami"})
+	require.True(t, resp.OK)
+
+	// The exec audit is still sleeping in its goroutine here. shutdown must
+	// wait for it before writing the shutdown audit entry.
+	d.shutdown()
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	execAuditIdx, shutdownAuditIdx := -1, -1
+	for i, c := range runner.completed {
+		if strings.Contains(c, "serve audit --action 'exec'") {
+			execAuditIdx = i
+		}
+		if strings.Contains(c, "serve audit --action shutdown") {
+			shutdownAuditIdx = i
+		}
+	}
+	require.NotEqual(t, -1, execAuditIdx, "exec audit was lost: %v", runner.completed)
+	require.NotEqual(t, -1, shutdownAuditIdx, "shutdown audit missing: %v", runner.completed)
+	assert.Less(t, execAuditIdx, shutdownAuditIdx, "shutdown audit must come after drained exec audit")
+}
+
 func TestShutdownNilRunner(t *testing.T) {
 	d := &Daemon{
 		sockPath: filepath.Join(t.TempDir(), "test.sock"),
@@ -199,9 +258,122 @@ func TestFindDeployBinary(t *testing.T) {
 	_ = err
 }
 
+func deployTestFixture() (data []byte, cachePath string) {
+	data = []byte("fake-helper-binary")
+	sum := sha256.Sum256(data)
+	return data, fmt.Sprintf("/home/u/.cache/remote-agent/agent-%x", sum[:8])
+}
+
+func TestDeployBinaryDataUploadsWhenNotCached(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	mock.onCommandErr(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath), []byte(""), 1)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.Equal(t, wantPath, path)
+	assert.True(t, cachedDeploy(path))
+
+	// The upload must stream the binary via stdin to a temp path, then mv it
+	// into place after chmod (so a concurrent connect never sees a partial or
+	// not-yet-executable file).
+	uploads := 0
+	for _, c := range mock.snapshotCalls() {
+		if c.Stdin != nil {
+			uploads++
+			assert.Equal(t, data, c.Stdin)
+			assert.Contains(t, c.Command, "mkdir -p '/home/u/.cache/remote-agent'")
+			assert.Contains(t, c.Command, "chmod 700")
+			assert.Contains(t, c.Command, fmt.Sprintf("mv -f"))
+			assert.Contains(t, c.Command, fmt.Sprintf("'%s'", wantPath))
+		}
+	}
+	assert.Equal(t, 1, uploads, "exactly one upload expected")
+}
+
+func TestDeployBinaryDataReusesCachedBinary(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+	sum := sha256.Sum256(data)
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	mock.onCommand(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath),
+		[]byte(fmt.Sprintf("%x  %s\n", sum, wantPath)), 0)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.True(t, reused)
+	assert.Equal(t, wantPath, path)
+
+	for _, c := range mock.snapshotCalls() {
+		assert.Nil(t, c.Stdin, "cache hit must not upload anything, ran: %s", c.Command)
+	}
+}
+
+func TestDeployBinaryDataHashMismatchReuploads(t *testing.T) {
+	mock := newMockRunner()
+	data, wantPath := deployTestFixture()
+
+	mock.onCommand(`printf %s "$HOME"`, []byte("/home/u"), 0)
+	// A file exists at the cache path but its content differs (stale or
+	// corrupt): it must be replaced, not trusted.
+	mock.onCommand(fmt.Sprintf("sha256sum '%s' 2>/dev/null", wantPath),
+		[]byte(fmt.Sprintf("deadbeef  %s\n", wantPath)), 0)
+
+	path, reused, err := deployBinaryData(mock, data)
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.Equal(t, wantPath, path)
+
+	uploads := 0
+	for _, c := range mock.snapshotCalls() {
+		if c.Stdin != nil {
+			uploads++
+			assert.Equal(t, data, c.Stdin)
+		}
+	}
+	assert.Equal(t, 1, uploads)
+}
+
+func TestDeployBinaryDataNoHomeFallsBackToTmp(t *testing.T) {
+	mock := newMockRunner()
+	mock.onCommandErr(`printf %s "$HOME"`, []byte("no home"), 1)
+
+	path, reused, err := deployBinaryData(mock, []byte("bin"))
+	require.Nil(t, err)
+	assert.False(t, reused)
+	assert.True(t, strings.HasPrefix(path, "/tmp/.remote-agent-"), "got %s", path)
+	assert.False(t, cachedDeploy(path))
+}
+
+func TestCachedDeploy(t *testing.T) {
+	assert.True(t, cachedDeploy("/home/u/.cache/remote-agent/agent-ab12cd"))
+	assert.False(t, cachedDeploy("/tmp/.remote-agent-xyz12345"))
+}
+
+func TestShutdownKeepsCachedBinary(t *testing.T) {
+	mock := newMockRunner()
+	d := &Daemon{
+		runner:     mock,
+		remotePath: "/home/u/.cache/remote-agent/agent-ab12cd",
+		keepBinary: true,
+		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
+		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+	}
+	d.shutdown()
+
+	for _, c := range mock.snapshotCalls() {
+		assert.False(t, strings.HasPrefix(c.Command, "rm -f"),
+			"cached helper must not be deleted on shutdown, ran: %s", c.Command)
+	}
+}
+
 func TestSshRunner(t *testing.T) {
-	// Verify the sshRunner struct implements Runner
-	var _ Runner = (*sshRunner)(nil)
+	// Verify sshutil.CommandRunner satisfies the daemon's Runner seam.
+	var _ Runner = (*sshutil.CommandRunner)(nil)
 }
 
 // startPingListener stands up a Unix socket that accepts one connection and
@@ -251,12 +423,56 @@ func TestPingSocketStale(t *testing.T) {
 	assert.False(t, pingSocket(sockPath))
 }
 
-func TestTouchActivity(t *testing.T) {
+func TestOpStartEndTracksActivity(t *testing.T) {
 	d := &Daemon{}
 	assert.True(t, d.lastActivity.IsZero())
 
-	d.touchActivity()
+	d.opStart()
 	assert.False(t, d.lastActivity.IsZero())
+	assert.Equal(t, 1, d.activeOps)
+
+	d.opEnd()
+	assert.Equal(t, 0, d.activeOps)
+	assert.False(t, d.lastActivity.IsZero())
+}
+
+func TestWatchIdleWaitsForActiveOps(t *testing.T) {
+	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
+	defer func() {
+		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
+	}()
+
+	idleTimeout = 1 * time.Millisecond
+	idleCheckInterval = 5 * time.Millisecond
+
+	done := make(chan struct{})
+	var once sync.Once
+	exitFunc = func(code int) { once.Do(func() { close(done) }) }
+
+	d := &Daemon{
+		sockPath:     filepath.Join(t.TempDir(), "busy.sock"),
+		pidPath:      filepath.Join(t.TempDir(), "busy.pid"),
+		lastActivity: time.Now().Add(-1 * time.Hour), // long past the idle timeout
+	}
+	// Simulate a long-running command (e.g. a 40-minute build) in flight.
+	d.opStart()
+
+	go d.watchIdle()
+
+	select {
+	case <-done:
+		t.Fatal("watchIdle shut the daemon down while an operation was in flight")
+	case <-time.After(50 * time.Millisecond):
+		// good: several ticks passed without a shutdown
+	}
+
+	// Once the operation completes, the idle countdown restarts and may fire.
+	d.opEnd()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchIdle did not fire after the operation completed")
+	}
 }
 
 func TestWatchIdleShutdown(t *testing.T) {

@@ -45,7 +45,7 @@ Three roles, one binary:
  CLI client             local daemon                      remote agent
  (cmd/, client/)        (daemon/)                         (agent/)
  ───────────────  unix socket  ───────────────────  SSH  ────────────────────
- remote-agent ls ─JSON req──▶  handler → ops          ─cmd─▶ /tmp/.remote-agent-xxx
+ remote-agent ls ─JSON req──▶  handler → ops          ─cmd─▶ ~/.cache/remote-agent/agent-xxx
                 ◀─JSON resp──   (one SSH connection)  ◀────  (hidden serve subcommands)
 ```
 
@@ -54,7 +54,9 @@ Three roles, one binary:
    Unix socket and prints the reply (compact text, or indented JSON with `--json`).
 2. **Local daemon** — `daemon/daemon.go`, started by `remote-agent connect`. Opens
    one SSH connection (`sshutil/`), deploys the binary to the remote, listens on
-   `/tmp/remote-agent-<sha>.sock`, and serializes all SSH use behind a mutex.
+   `/tmp/remote-agent-<sha>.sock`, and handles requests concurrently — each command
+   runs on its own multiplexed SSH channel via `sshutil.CommandRunner`, which
+   bounds in-flight commands and keeps spare sessions pre-opened.
    `daemon/handler.go` routes an action to a handler in `daemon/ops.go`.
 3. **Remote agent** — the same binary, copied to the remote and run as the hidden
    `serve` subcommand (`cmd/serve*.go` → `agent/`) for operations that need
@@ -63,12 +65,17 @@ Three roles, one binary:
 
 ### Request lifecycle
 
-`connect` dials SSH, prints the host-key fingerprint, deploys
-`/tmp/.remote-agent-<rand>`, writes a startup audit entry, then listens. Each
-command: the client locates the socket → the daemon locks the mutex → runs either
-a plain shell command or `<remote-binary> serve <sub>` → returns a
-`protocol.DaemonResponse`. `disconnect` writes a shutdown audit entry, `rm`s the
-remote binary, removes the socket/PID files, and exits.
+`connect` dials SSH, prints the host-key fingerprint, deploys the helper to a
+content-addressed path (`~/.cache/remote-agent/agent-<sha256[:8]>`) — reusing an
+identical cached copy when present, so reconnects skip the multi-MB upload — then
+writes a startup audit entry and listens. When `$HOME` is unusable it falls back
+to a random `/tmp/.remote-agent-<rand>` path (removed again on disconnect). Each
+command: the client locates the socket → the daemon runs either a plain shell
+command or `<remote-binary> serve <sub>` on its own SSH channel (the audit entry
+for exec/write/upload runs concurrently on another channel) → returns a
+`protocol.DaemonResponse`. The idle watchdog never fires while operations are in
+flight. `disconnect` drains pending audits, writes a shutdown audit entry, removes
+the socket/PID files, and exits; cached helpers stay in place for the next connect.
 
 ### Packages
 
@@ -78,7 +85,7 @@ remote binary, removes the socket/PID files, and exits.
 | `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim. |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`). |
 | `agent/` | Remote-side system/process/file collectors; platform files selected by build tag. |
-| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. |
+| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
 
 ## Conventions
@@ -89,8 +96,11 @@ remote binary, removes the socket/PID files, and exits.
   `_windows`), not `runtime.GOOS` branches inside a shared file.
 - **Modern Go (1.24)**: prefer `any` over `interface{}`, `strings.Cut` for two-way
   splits, `math/rand/v2`, and `os.Getpagesize()` over a hardcoded page size.
-- **Remote file I/O** is base64-framed over the SSH channel to stay binary-safe;
-  shell arguments are quoted with `shellEscape` (`daemon/daemon.go`).
+- **Remote file I/O** streams raw bytes over the SSH channel (stdin for writes,
+  stdout for reads — the channel is binary-safe). Only the local JSON socket hop
+  base64-frames non-UTF-8 payloads (`content_b64` in `read`/`write`), because
+  JSON strings cannot carry invalid UTF-8. Shell arguments are quoted with
+  `shellEscape` (`daemon/daemon.go`).
 - **Errors** wrap with `%w`; handlers return `errResponse(err)` / `okResponse(data)`
   (`daemon/handler.go`).
 
@@ -105,8 +115,10 @@ remote binary, removes the socket/PID files, and exits.
   `os.Exit` during `disconnect`.
 - `exec ls [path]` is rewritten to the structured `ls` handler; `ls` with other
   flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`).
-- Host-key verification is trust-on-first-use when `~/.ssh/known_hosts` is absent
-  (`sshutil/ssh.go`); the fingerprint is printed on connect so it can be verified.
+- Host-key verification has OpenSSH `accept-new` semantics (`sshutil/ssh.go`):
+  an unknown host is trusted on first use and its key recorded in
+  `~/.ssh/known_hosts`; a recorded host must present the same key or the
+  connection fails. The fingerprint is printed on connect for verification.
 - `client.Exec` returns `(exitCode, err)`: `err` is a transport/daemon failure,
   while a non-zero remote exit is reported via `exitCode`. `cmd/exec.go` mirrors
   that code as the process exit code (via the `osExit` test seam), so callers like

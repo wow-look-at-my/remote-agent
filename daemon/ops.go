@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
@@ -17,9 +18,6 @@ type Runner interface {
 }
 
 func (h *Handler) handlePing() *protocol.DaemonResponse {
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	stdout, _, _, err := h.daemon.runner.Run("echo pong")
 	if err != nil {
 		return errResponse(fmt.Errorf("ping failed: %w", err))
@@ -41,13 +39,8 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	// Strip pointless trailing 2>&1 — stderr is already captured separately
 	command = stripTrailingRedirect(command)
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
-	// Audit log the command
-	auditCmd := fmt.Sprintf("%s serve audit --action exec --detail %s",
-		h.daemon.remotePath, shellEscape(command))
-	h.daemon.runner.Run(auditCmd)
+	// Audit log the command (concurrently, on its own SSH channel).
+	h.daemon.auditAsync("exec", command)
 
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(command)
 	if err != nil {
@@ -60,36 +53,58 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	})
 }
 
-// parseLsCommand checks if a command is a simple "ls [path]" and returns
-// the path and whether it's recursive. Returns ok=false for complex ls
-// invocations with unsupported flags.
+// parseLsCommand checks if a command is a simple "ls [path]" that the native
+// ls handler can answer faithfully, returning the path and whether it is
+// recursive. Anything the structured handler cannot reproduce falls through
+// to real exec (ok=false): unsupported flags, multiple paths, and — crucially
+// — paths with characters the shell would transform. The handler quotes the
+// path literally, so rewriting "ls *.go" would search for a file literally
+// named "*.go", find nothing, and silently print an empty listing.
 func parseLsCommand(command string) (path string, recursive bool, ok bool) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 || parts[0] != "ls" {
 		return "", false, false
 	}
 	path = "."
+	seenPath := false
 	for _, p := range parts[1:] {
-		if p == "-R" {
+		switch {
+		case p == "-R":
 			recursive = true
-		} else if strings.HasPrefix(p, "-") {
+		case strings.HasPrefix(p, "-"):
 			// Has flags we don't support natively — let exec handle it
 			return "", false, false
-		} else {
+		case seenPath || !plainLsPath(p):
+			return "", false, false
+		default:
 			path = p
+			seenPath = true
 		}
 	}
 	return path, recursive, true
 }
 
-// stripTrailingRedirect removes a trailing "2>&1" from commands since
-// stderr is already captured separately by the SSH transport.
+// plainLsPath reports whether p is a literal path with no characters the
+// shell (globbing, expansion, quoting, escaping, operators) would transform.
+func plainLsPath(p string) bool {
+	return !strings.ContainsAny(p, "*?[]{}~$`\"'\\!()<>|&;#")
+}
+
+// stripTrailingRedirect removes a trailing "2>&1" from commands since stderr
+// is already captured separately by the SSH transport. It leaves the command
+// untouched when any other '>' redirect is present: in "cmd > log 2>&1" the
+// trailing redirect sends stderr into the log file, and stripping it would
+// change what lands in the file.
 func stripTrailingRedirect(command string) string {
 	trimmed := strings.TrimSpace(command)
-	if strings.HasSuffix(trimmed, "2>&1") {
-		return strings.TrimSpace(trimmed[:len(trimmed)-4])
+	if !strings.HasSuffix(trimmed, "2>&1") {
+		return command
 	}
-	return command
+	rest := strings.TrimSpace(trimmed[:len(trimmed)-4])
+	if strings.Contains(rest, ">") {
+		return command
+	}
+	return rest
 }
 
 func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
@@ -98,11 +113,10 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
-	// Use cat to read the file, base64 encode to avoid binary issues
-	cmd := fmt.Sprintf("base64 %s", shellEscape(path))
+	// cat the raw bytes: the SSH channel is binary-safe, so remote base64
+	// encoding (33% wire inflation plus an extra remote process) is wasted
+	// work, and it kept read from working on remotes without a base64 binary.
+	cmd := fmt.Sprintf("cat %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("read failed: %w", err))
@@ -111,42 +125,44 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("read %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
-	// Decode base64 to get actual content
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(stdout)))
-	if err != nil {
-		return errResponse(fmt.Errorf("decode file content: %w", err))
+	info := protocol.FileInfo{Size: int64(len(stdout))}
+	// JSON strings cannot carry invalid UTF-8 (encoding/json substitutes
+	// U+FFFD), so binary content is base64-framed across the socket hop and
+	// decoded again by the client. Text stays human-readable in --json.
+	if utf8.Valid(stdout) {
+		info.Content = string(stdout)
+	} else {
+		info.ContentB64 = base64.StdEncoding.EncodeToString(stdout)
 	}
-
-	return okResponse(protocol.FileInfo{
-		Content: string(decoded),
-		Size:    int64(len(decoded)),
-	})
+	return okResponse(info)
 }
 
 func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	path, _ := params["path"].(string)
-	content, _ := params["content"].(string)
 	mode, _ := params["mode"].(string)
 	if path == "" {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
+	data, err := contentParam(params)
+	if err != nil {
+		return errResponse(err)
+	}
 	if mode == "" {
 		mode = "0644"
 	}
+	if !validChmodMode(mode) {
+		return errResponse(fmt.Errorf("invalid mode %q: expected an octal mode like 0644", mode))
+	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
+	// Audit (concurrently, on its own SSH channel)
+	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(data)))
 
-	// Audit
-	auditCmd := fmt.Sprintf("%s serve audit --action write --detail %s",
-		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", path, len(content))))
-	h.daemon.runner.Run(auditCmd)
-
-	// Write via cat, using base64 to avoid binary issues
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := fmt.Sprintf("echo %s | base64 -d > %s && chmod %s %s",
-		shellEscape(encoded), shellEscape(path), mode, shellEscape(path))
-	_, stderr, exitCode, err := h.daemon.runner.Run(cmd)
+	// Stream the content over stdin. The SSH channel is binary-safe, and
+	// unlike the previous echo-base64-in-the-command-line approach this is
+	// immune to the kernel's per-argument size cap (MAX_ARG_STRLEN, 128 KiB),
+	// which made every write over ~96 KiB fail with "Argument list too long".
+	cmd := fmt.Sprintf("cat > %s && chmod %s %s", shellEscape(path), mode, shellEscape(path))
+	_, stderr, exitCode, err := h.daemon.runner.RunStdin(cmd, data)
 	if err != nil {
 		return errResponse(fmt.Errorf("write failed: %w", err))
 	}
@@ -154,7 +170,36 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("write %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
-	return okResponse(protocol.WriteResult{BytesWritten: int64(len(content))})
+	return okResponse(protocol.WriteResult{BytesWritten: int64(len(data))})
+}
+
+// contentParam extracts a write payload from request params. content_b64
+// (base64, binary-safe across the JSON socket hop) is preferred; the plain
+// content string is the fallback used for valid-UTF-8 payloads.
+func contentParam(params map[string]any) ([]byte, error) {
+	if b64, ok := params["content_b64"].(string); ok && b64 != "" {
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("decode content_b64: %w", err)
+		}
+		return data, nil
+	}
+	content, _ := params["content"].(string)
+	return []byte(content), nil
+}
+
+// validChmodMode reports whether mode is a plain octal chmod mode (like 644
+// or 0755), the only form handleWrite splices into the remote shell command.
+func validChmodMode(mode string) bool {
+	if len(mode) < 3 || len(mode) > 4 {
+		return false
+	}
+	for _, c := range mode {
+		if c < '0' || c > '7' {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {
@@ -170,13 +215,8 @@ func (h *Handler) handleUpload(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("read local file %s: %w", localPath, err))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
-	// Audit
-	auditCmd := fmt.Sprintf("%s serve audit --action upload --detail %s",
-		h.daemon.remotePath, shellEscape(fmt.Sprintf("path=%s size=%d", remotePath, len(data))))
-	h.daemon.runner.Run(auditCmd)
+	// Audit (concurrently, on its own SSH channel)
+	h.daemon.auditAsync("upload", fmt.Sprintf("path=%s size=%d", remotePath, len(data)))
 
 	// Write via stdin pipe (handles binary data correctly)
 	cmd := fmt.Sprintf("cat > %s", shellEscape(remotePath))
@@ -197,9 +237,6 @@ func (h *Handler) handleDownload(params map[string]any) *protocol.DaemonResponse
 	if remotePath == "" || localPath == "" {
 		return errResponse(fmt.Errorf("missing 'remote_path' or 'local_path' parameter"))
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Read remote file via cat
 	cmd := fmt.Sprintf("cat %s", shellEscape(remotePath))
@@ -226,9 +263,6 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 	if path == "" || oldText == "" {
 		return errResponse(fmt.Errorf("missing 'path' or 'old' parameter"))
 	}
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
@@ -264,25 +298,33 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	// Use find for both modes; %y gives type (d/f/l), %l gives symlink target.
 	// find is present on BusyBox (and other minimal images) where GNU
 	// `stat --format` is not. The non-recursive case just caps depth at 1.
 	var cmd string
 	if recursive {
-		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
+		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
 	} else {
-		cmd = fmt.Sprintf("find %s -maxdepth 1 -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n' 2>/dev/null", shellEscape(path))
+		cmd = fmt.Sprintf("find %s -maxdepth 1 -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
 	}
 
-	stdout, _, _, err := h.daemon.runner.Run(cmd)
+	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("ls failed: %w", err))
 	}
 
 	entries := parseFindOutput(string(stdout))
+	// find exits non-zero on errors like a missing directory. A partial
+	// listing (e.g. permission-denied subtrees during a recursive walk) still
+	// returns what was found, but a failure with no entries at all used to be
+	// silently reported as an empty directory — surface the error instead.
+	if exitCode != 0 && len(entries) == 0 {
+		msg := strings.TrimSpace(string(stderr))
+		if msg == "" {
+			msg = fmt.Sprintf("find exited %d", exitCode)
+		}
+		return errResponse(fmt.Errorf("ls %s: %s", path, msg))
+	}
 	return okResponse(protocol.DirListing{Path: path, Entries: entries})
 }
 
@@ -335,9 +377,6 @@ func (h *Handler) handleReadlink(params map[string]any) *protocol.DaemonResponse
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	cmd := fmt.Sprintf("readlink -f %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
@@ -355,9 +394,6 @@ func (h *Handler) handleReadlink(params map[string]any) *protocol.DaemonResponse
 
 func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 	filter, _ := params["filter"].(string)
-
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
 
 	// Use remote helper for structured output
 	cmd := h.daemon.remotePath + " serve ps"
@@ -380,9 +416,6 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 }
 
 func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
-	h.daemon.mu.Lock()
-	defer h.daemon.mu.Unlock()
-
 	// Use remote helper
 	cmd := h.daemon.remotePath + " serve sysinfo"
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)

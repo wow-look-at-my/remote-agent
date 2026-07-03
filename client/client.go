@@ -1,11 +1,13 @@
 package client
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/daemon"
 	"github.com/wow-look-at-my/remote-agent/protocol"
@@ -148,6 +150,16 @@ func printExecText(m map[string]any) error {
 }
 
 func printReadText(m map[string]any) error {
+	// Binary files arrive base64-framed (JSON cannot carry invalid UTF-8);
+	// decode back to the exact original bytes.
+	if b64, _ := m["content_b64"].(string); b64 != "" {
+		data, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return fmt.Errorf("decode content_b64: %w", err)
+		}
+		_, err = os.Stdout.Write(data)
+		return err
+	}
 	content, _ := m["content"].(string)
 	fmt.Fprint(os.Stdout, content)
 	return nil
@@ -366,13 +378,22 @@ func Read(path string) error {
 
 // Write writes content to a remote file with the given mode.
 func Write(path, mode string, content []byte) error {
+	params := map[string]any{
+		"path": path,
+		"mode": mode,
+	}
+	// Valid UTF-8 travels as a plain string (human-readable in --json). Any
+	// other bytes are base64-framed: encoding/json silently replaces invalid
+	// UTF-8 with U+FFFD, which would corrupt binary payloads on the socket hop.
+	if utf8.Valid(content) {
+		params["content"] = string(content)
+	} else {
+		params["content_b64"] = base64.StdEncoding.EncodeToString(content)
+	}
+
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "write",
-		Params: map[string]any{
-			"path":    path,
-			"content": string(content),
-			"mode":    mode,
-		},
+		Params: params,
 	})
 	if err != nil {
 		return err
