@@ -12,11 +12,13 @@ local **daemon** that holds one SSH connection, plus a copy of the same binary
 
 It also ships a `claude` launcher (`remote-agent claude [user@host]`) that runs
 Claude Code with `CLAUDE_CODE_SHELL_PREFIX` pointed at a one-line shim
-(`client/shellprefix.sh`, embedded via `//go:embed`) so every Bash tool command
-Claude issues is forwarded to the remote through the daemon. The shim must be a
-**single-token** program path — Claude's prefix wrapper shell-quotes the program
-name, so a multi-word prefix like `remote-agent exec` would be treated as one
-executable name and fail.
+(`client/shellprefix.sh`, embedded via `//go:embed`). The shim execs the hidden
+`claude-shim` subcommand (`client/claudeshim.go`), which routes each prefix
+invocation: Bash tool commands are laundered and forwarded to the remote
+through the daemon, while hook commands and MCP stdio servers run **locally**
+(see Gotchas). The shim must be a **single-token** program path — Claude's
+prefix wrapper shell-quotes the program name, so a multi-word prefix like
+`remote-agent claude-shim` would be treated as one executable name and fail.
 
 ## Build, test, lint
 
@@ -82,7 +84,7 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 | Path | Responsibility |
 |------|----------------|
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
-| `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim. |
+| `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`). |
 | `agent/` | Remote-side system/process/file collectors; platform files selected by build tag. |
 | `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
@@ -114,7 +116,43 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   for mocking SSH execution, and `exitFunc` (also `ops.go`) is the seam for
   `os.Exit` during `disconnect`.
 - `exec ls [path]` is rewritten to the structured `ls` handler; `ls` with other
-  flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`).
+  flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`). A
+  leading `--` argument to `exec` is dropped rather than joined into the remote
+  command string (`sh -c '-- cmd'` errors on every shell).
+- **Claude Code v2.1.185+ wraps hooks and MCP stdio servers with
+  CLAUDE_CODE_SHELL_PREFIX too** — not just Bash tool commands. Through a
+  forward-everything shim, hooks broke (claude injects CLAUDE_PROJECT_DIR /
+  CLAUDE_ENV_FILE into the LOCAL spawn env only, and the hook script exists
+  only locally) and MCP stdio servers could never handshake (the remote exec
+  path is buffered request/response with no stdin bridge). `claude-shim`
+  therefore runs hooks and MCP servers **locally by design** (`/bin/sh -c`
+  with inherited env and stdio; exec(2) on Unix), restoring pre-2.1.185
+  semantics. Classification is by the machine-generated glob-setup clause
+  (`{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; }
+  >/dev/null 2>&1 || true`) that v2.1.185 embeds in every Bash tool wrapper
+  iff a prefix is set — user hook/MCP command lines cannot plausibly contain
+  it. Misclassification risk is asymmetric: forwarding a hook merely breaks
+  the hook, but running a Bash tool command locally would silently execute it
+  on the wrong machine.
+- **Bash tool wrappers are laundered before forwarding**
+  (`launderBashToolWrapper` in `client/claudeshim.go`). Stripped: (a) the
+  leading `source <local shell-snapshot> 2>/dev/null || true &&` — the
+  snapshot file exists only locally, sourcing a local bash state dump on the
+  remote is wrong on every shell, and on BusyBox ash `source` is the POSIX
+  special builtin `.` whose failed open is a FATAL, silenced abort that made
+  every command return "(No output)" (exit 2, zero bytes); (b) the trailing
+  `&& pwd -P >| <local tmp path>` — it littered the remote /tmp while the
+  local cwd file Claude reads went unwritten ("Shell cwd was reset" after
+  every command). On success, claude-shim writes the local cwd file itself
+  with its own working directory. Everything between the two clauses (the
+  inlined session-env preamble, the glob marker, the eval) is forwarded
+  verbatim. Paths in both clauses may be bare OR single-quoted (Claude quotes
+  only outside `[A-Za-z0-9_./:=@+,-]`); non-matching clauses are left
+  untouched.
+- `cd` does not persist between Bash tool calls through the launcher: each
+  forwarded command runs as a one-shot exec on the remote (fresh login shell
+  in the remote home). Documented limitation — combine steps in a single
+  command (`cd /x && make`).
 - Host-key verification has OpenSSH `accept-new` semantics (`sshutil/ssh.go`):
   an unknown host is trusted on first use and its key recorded in
   `~/.ssh/known_hosts`; a recorded host must present the same key or the

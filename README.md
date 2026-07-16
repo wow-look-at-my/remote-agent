@@ -76,6 +76,14 @@ A daemon started by this command is stopped again when claude exits; pass
 > (e.g. `cd`, exported variables) does not persist between calls — use absolute
 > paths or combine steps in a single command (`cd /x && make`).
 
+Only Bash tool commands go to the remote. Claude Code v2.1.185+ also passes
+**hook commands and MCP stdio servers** through `CLAUDE_CODE_SHELL_PREFIX`;
+the shim recognizes Claude's machine-generated Bash tool wrapper and forwards
+only that (with its local-only scaffolding — the shell-snapshot `source` and
+the cwd-tracking tail — stripped), while hooks and MCP servers run on the
+local machine, where the scripts and environment variables Claude prepared
+for them actually exist.
+
 ### Commands
 
 | Command | Description |

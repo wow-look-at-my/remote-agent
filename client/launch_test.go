@@ -269,11 +269,12 @@ func TestRunClaudeProcess(t *testing.T) {
 	assert.NoError(t, runClaudeProcess("/bin/true", nil, os.Environ()))
 }
 
-// TestShimForwardsToRemoteAgentExec proves that the embedded shim, when invoked
-// the way Claude Code's prefix wrapper invokes it (single-token program followed
-// by the whole bash script as one argument), forwards that script verbatim to
-// `<REMOTE_AGENT_BIN> exec`.
-func TestShimForwardsToRemoteAgentExec(t *testing.T) {
+// TestShimForwardsToClaudeShim proves that the embedded shim, when invoked the
+// way Claude Code's prefix wrapper invokes it (single-token program followed by
+// the whole command line as one argument), forwards that command line verbatim
+// to `<REMOTE_AGENT_BIN> claude-shim` -- the hidden subcommand that routes Bash
+// tool wrappers to the remote and hooks/MCP servers to local execution.
+func TestShimForwardsToClaudeShim(t *testing.T) {
 	dir := t.TempDir()
 	shim, err := writeShim(dir)
 	require.NoError(t, err)
@@ -291,6 +292,6 @@ func TestShimForwardsToRemoteAgentExec(t *testing.T) {
 
 	got, err := os.ReadFile(argvFile)
 	require.NoError(t, err)
-	// The shim must call: fake-remote-agent exec "<script>"
-	assert.Equal(t, "exec\n"+script+"\n", string(got))
+	// The shim must call: fake-remote-agent claude-shim "<script>"
+	assert.Equal(t, "claude-shim\n"+script+"\n", string(got))
 }
