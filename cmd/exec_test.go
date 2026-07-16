@@ -82,6 +82,36 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 	assert.Equal(t, 7, gotCode)
 }
 
+func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "exec.sock")
+	cleanup := startLocalExecDaemon(t, sock)
+	defer cleanup()
+	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+
+	var gotCode int
+	var called bool
+	old := osExit
+	osExit = func(c int) { called, gotCode = true, c }
+	defer func() { osExit = old }()
+
+	// With flag parsing disabled the "--" separator reaches RunE as a literal
+	// argument. It must not be joined into the remote command string: the exit
+	// code below only comes back as 7 if the remote shell ran `exit 7` rather
+	// than `-- exit 7` (which errors on every shell).
+	suppressStdout(t, func() {
+		assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
+	})
+
+	assert.True(t, called)
+	assert.Equal(t, 7, gotCode)
+}
+
+func TestExecuteExecOnlyDashDashIsUsageError(t *testing.T) {
+	err := execCmd.RunE(execCmd, []string{"--"})
+	assert.Error(t, err)
+}
+
 func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
