@@ -7,6 +7,19 @@ directories and processes, and gather system info — with optional JSON output.
 It runs a local **daemon** that holds one SSH connection and deploys a copy of
 itself to the remote to service operations that need structured output there.
 
+## Install
+
+Homebrew (macOS or Linux):
+
+```sh
+brew tap pazer/build https://brew.pazer.build/tap.git
+brew trust pazer/build
+brew install pazer/build/remote-agent
+```
+
+Or download a prebuilt binary directly:
+`https://dl.pazer.build/remote-agent?os=<linux|darwin|windows>&arch=<amd64|arm64>`.
+
 ## Build
 
 Use the [`go-toolchain`](https://github.com/wow-look-at-my/go-toolchain) wrapper
