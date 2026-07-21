@@ -36,6 +36,16 @@ gofmt-clean — `gofmt -l .` must print nothing. CI (`.github/workflows/build.ym
 runs the same toolchain via `wow-look-at-my/go-toolchain@v1`, and nothing merges
 without it passing.
 
+CI also **publishes on every push**: `go-toolchain@v1`'s `autorelease` input
+(default `'true'`) runs the stock buildhost-publish action after the build,
+uploading the six-binary matrix (linux/darwin/windows x amd64/arm64) to the
+buildhost project `remote-agent` with the git branch attached. Branch pushes
+create branch-scoped releases only; a **master** publish is what advances the
+bare "latest" download URL and the Homebrew formula
+(`brew install pazer/build/remote-agent`). buildhost also syncs the project's
+public/private visibility to the repo's visibility on OIDC publishes. Do not
+add a `publish` job to build.yml — it would duplicate autorelease.
+
 A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
 `make build-all`), but `go-toolchain` is the source of truth.
 
