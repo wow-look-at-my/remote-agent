@@ -254,8 +254,13 @@ func mountForSession(sockPath string, opts LaunchOptions) (mountPoint, remoteDir
 		"remote_path": remoteDir,
 	}, nil)
 	if err != nil {
+		// The default is the remote home directory, which collides with a
+		// local home of the same name (both /root, both /home/alice, ...).
+		// Naming a project directory is the usual fix and keeps paths
+		// identical on both sides, so it is the first suggestion.
 		return "", "", fmt.Errorf("mount %s at %s: %w\n"+
-			"The mount point must be an empty directory you can create; pass --mount-at to use a different one, "+
+			"Try --dir <remote project directory> (mounted at the same local path), "+
+			"--mount-at <empty local directory> to mount somewhere else, "+
 			"or --no-mount to fall back to remote-agent's own tools", remoteDir, mountPoint, err)
 	}
 	return mountPoint, remoteDir, nil
