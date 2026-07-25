@@ -47,6 +47,10 @@ func printTextResponse(data any, action string) error {
 		return printEditText(m)
 	case "ls":
 		return printLsText(m)
+	case "mount", "unmount":
+		return printMountText(m)
+	case "mounts":
+		return printMountsText(m)
 	case "glob":
 		return printGlobText(m)
 	case "grep":
@@ -153,6 +157,31 @@ func printLsText(m map[string]any) error {
 		} else {
 			fmt.Fprintf(os.Stdout, "%s\t%s\t%d\t%s\n", typeChar, mode, int64(size), name)
 		}
+	}
+	return nil
+}
+
+func printMountText(m map[string]any) error {
+	local, _ := m["local_path"].(string)
+	remote, _ := m["remote_path"].(string)
+	if mounted, _ := m["mounted"].(bool); mounted {
+		fmt.Fprintf(os.Stdout, "mounted %s at %s\n", remote, local)
+	} else {
+		fmt.Fprintf(os.Stdout, "unmounted %s\n", local)
+	}
+	return nil
+}
+
+func printMountsText(m map[string]any) error {
+	mounts, _ := m["mounts"].([]any)
+	for _, entry := range mounts {
+		mount, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		local, _ := mount["local_path"].(string)
+		remote, _ := mount["remote_path"].(string)
+		fmt.Fprintf(os.Stdout, "%s -> %s\n", local, remote)
 	}
 	return nil
 }

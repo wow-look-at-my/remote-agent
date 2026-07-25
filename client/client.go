@@ -329,3 +329,41 @@ func Ping() error {
 	}
 	return printResponse(resp, "ping")
 }
+
+// Mount mounts remotePath from the remote host at localPath, so every local
+// program reads and writes remote files through ordinary paths.
+func Mount(localPath, remotePath string, allowOther bool) error {
+	resp, err := sendRequest(&protocol.DaemonRequest{
+		Action: "mount",
+		Params: map[string]any{
+			"local_path":  localPath,
+			"remote_path": remotePath,
+			"allow_other": allowOther,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return printResponse(resp, "mount")
+}
+
+// Unmount detaches the mount at localPath.
+func Unmount(localPath string) error {
+	resp, err := sendRequest(&protocol.DaemonRequest{
+		Action: "unmount",
+		Params: map[string]any{"local_path": localPath},
+	})
+	if err != nil {
+		return err
+	}
+	return printResponse(resp, "unmount")
+}
+
+// Mounts lists the daemon's live mounts.
+func Mounts() error {
+	resp, err := sendRequest(&protocol.DaemonRequest{Action: "mounts"})
+	if err != nil {
+		return err
+	}
+	return printResponse(resp, "mounts")
+}

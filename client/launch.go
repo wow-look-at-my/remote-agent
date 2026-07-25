@@ -27,10 +27,21 @@ type LaunchOptions struct {
 	ClaudeArgs []string // extra arguments passed through to claude
 	KeepDaemon bool     // keep a daemon we started running after claude exits
 	ShimDir    string   // directory for the shim + daemon log (default os.TempDir())
-	// LocalTools keeps Claude Code's built-in filesystem tools (which act on
-	// the LOCAL machine) instead of replacing them with the remote MCP
-	// toolset. Off by default: in a remote session a local Read or Write is
-	// almost always the wrong machine.
+
+	// RemoteDir is the remote directory to work in, mounted locally at the
+	// same path. Empty means the remote home directory.
+	RemoteDir string
+	// MountAt overrides the local mount point. Leaving it empty mounts at the
+	// identical path, which is what keeps the two halves of the session
+	// coherent: a path means the same thing to a file tool (local, through
+	// the mount) and to a shell command (remote, over SSH).
+	MountAt string
+	// NoMount skips the mount and falls back to serving the remote filesystem
+	// as MCP tools -- for platforms where FUSE is unavailable. Only the tools
+	// remote-agent itself provides reach the remote in that mode.
+	NoMount bool
+	// LocalTools, with NoMount, leaves Claude's built-in file tools in place
+	// so only Bash runs remotely.
 	LocalTools bool
 }
 
@@ -103,17 +114,47 @@ func LaunchClaude(opts LaunchOptions) error {
 	})
 
 	claudeArgs := opts.ClaudeArgs
-	if opts.LocalTools {
-		fmt.Fprintf(os.Stderr, "Launching claude; Bash commands will run on the remote host (file tools stay local).\n")
-	} else {
-		configPath, err := writeMCPConfig(tmpDir(opts.ShimDir), self, sockPath)
-		if err != nil {
-			return fmt.Errorf("write MCP config: %w", err)
+	workDir := ""
+
+	if opts.NoMount {
+		// Fallback mode: no mount, so only tools remote-agent itself provides
+		// can reach the remote host.
+		if opts.LocalTools {
+			fmt.Fprintf(os.Stderr, "Launching claude; Bash commands will run on the remote host (file tools stay local).\n")
+		} else {
+			configPath, err := writeMCPConfig(tmpDir(opts.ShimDir), self, sockPath)
+			if err != nil {
+				return fmt.Errorf("write MCP config: %w", err)
+			}
+			claudeArgs = append(remoteToolArgs(configPath), claudeArgs...)
+			fmt.Fprintf(os.Stderr, "Launching claude without a mount; only remote-agent's own tools reach the remote host.\n")
 		}
-		claudeArgs = append(remoteToolArgs(configPath), claudeArgs...)
-		fmt.Fprintf(os.Stderr, "Launching claude; Bash commands and file tools will run on the remote host.\n")
+	} else {
+		mountPoint, remoteDir, err := mountForSession(sockPath, opts)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := unmountSession(sockPath, mountPoint); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			}
+		}()
+
+		workDir = mountPoint
+		if mountPoint == remoteDir {
+			// Paths mean the same thing on both sides, so forwarded commands
+			// can run in the directory claude is working in rather than the
+			// remote home. The shim reads this.
+			env = buildEnv(env, map[string]string{"REMOTE_AGENT_MOUNT": mountPoint})
+			fmt.Fprintf(os.Stderr, "Mounted %s at the same local path; every tool now works on the remote host.\n", remoteDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "Mounted %s at %s; every tool now works on the remote host.\n", remoteDir, mountPoint)
+			fmt.Fprintf(os.Stderr, "Note: the mount point differs from the remote path, so file paths (%s/...) and "+
+				"shell paths (%s/...) are not the same string.\n", mountPoint, remoteDir)
+		}
 	}
-	runErr := runClaudeFunc(resolved, claudeArgs, env)
+
+	runErr := runClaudeFunc(resolved, claudeArgs, env, workDir)
 
 	if startedDaemon && !opts.KeepDaemon {
 		fmt.Fprintf(os.Stderr, "Stopping remote-agent daemon...\n")
@@ -175,14 +216,91 @@ func startDaemonProcess(self, target string, port int, logPath string) (*os.Proc
 	return cmd.Process, nil
 }
 
-// runClaudeProcess runs claude with inherited stdio and the given environment.
-func runClaudeProcess(bin string, args, env []string) error {
+// runClaudeProcess runs claude with inherited stdio, the given environment,
+// and (when mounted) the mount point as its working directory -- so relative
+// paths, project files and CLAUDE.md all come from the remote host.
+func runClaudeProcess(bin string, args, env []string, dir string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = env
+	cmd.Dir = dir
 	return cmd.Run()
+}
+
+// mountForSession mounts the remote working directory for this launch and
+// returns the local mount point and the remote directory it serves.
+//
+// The mount point defaults to the *same absolute path* as the remote
+// directory. That is what makes the session coherent: file tools go through
+// the mount locally and shell commands run on the remote, and both mean the
+// same thing by "/srv/app/main.go". A different local path would leave the
+// model juggling two path spaces for one set of files.
+func mountForSession(sockPath string, opts LaunchOptions) (mountPoint, remoteDir string, err error) {
+	remoteDir = opts.RemoteDir
+	if remoteDir == "" {
+		if remoteDir, err = remoteHomeDir(sockPath); err != nil {
+			return "", "", err
+		}
+	}
+	mountPoint = opts.MountAt
+	if mountPoint == "" {
+		mountPoint = remoteDir
+	}
+
+	err = callSocket(sockPath, "mount", map[string]any{
+		"local_path":  mountPoint,
+		"remote_path": remoteDir,
+	}, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("mount %s at %s: %w\n"+
+			"The mount point must be an empty directory you can create; pass --mount-at to use a different one, "+
+			"or --no-mount to fall back to remote-agent's own tools", remoteDir, mountPoint, err)
+	}
+	return mountPoint, remoteDir, nil
+}
+
+// unmountSession detaches the session's mount when claude exits.
+func unmountSession(sockPath, mountPoint string) error {
+	if err := callSocket(sockPath, "unmount", map[string]any{"local_path": mountPoint}, nil); err != nil {
+		return fmt.Errorf("could not unmount %s: %w", mountPoint, err)
+	}
+	return nil
+}
+
+// remoteHomeDir asks the remote what its home directory is, which is where a
+// session works unless told otherwise.
+func remoteHomeDir(sockPath string) (string, error) {
+	var result protocol.ExecResult
+	if err := callSocket(sockPath, "exec", map[string]any{"command": "pwd"}, &result); err != nil {
+		return "", fmt.Errorf("determine the remote working directory: %w", err)
+	}
+	dir := strings.TrimSpace(result.Stdout)
+	if dir == "" {
+		return "", fmt.Errorf("the remote returned no working directory; pass --dir to choose one")
+	}
+	return dir, nil
+}
+
+// callSocket sends one request to a specific daemon socket and decodes the
+// payload, mirroring Call for callers that already know their socket.
+func callSocket(sockPath, action string, params map[string]any, out any) error {
+	resp, err := sendRequestTo(sockPath, &protocol.DaemonRequest{Action: action, Params: params})
+	if err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+	if out == nil {
+		return nil
+	}
+	data, err := json.Marshal(resp.Data)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
 }
 
 // waitForDaemon polls until the daemon at sockPath answers a ping or timeout.

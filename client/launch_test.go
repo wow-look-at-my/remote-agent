@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,42 @@ import (
 	"github.com/wow-look-at-my/remote-agent/daemon"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
+
+// mockRemoteHome is the working directory the mock daemon reports for the
+// remote host, which is what the launcher mounts by default.
+const mockRemoteHome = "/remote/home"
+
+// mockDaemonCalls records the mount traffic a launch generates.
+var mockDaemonCalls mountCallLog
+
+type mountCallLog struct {
+	mu    sync.Mutex
+	calls []mountCall
+}
+
+type mountCall struct {
+	Action string
+	Local  string
+	Remote string
+}
+
+func (l *mountCallLog) record(action, local, remote string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, mountCall{Action: action, Local: local, Remote: remote})
+}
+
+func (l *mountCallLog) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = nil
+}
+
+func (l *mountCallLog) snapshot() []mountCall {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]mountCall(nil), l.calls...)
+}
 
 // startPongDaemon stands up a mock daemon at sockPath that answers ping with
 // pong and returns OK for everything else.
@@ -36,8 +73,21 @@ func startPongDaemon(t *testing.T, sockPath string) func() {
 					return
 				}
 				resp := protocol.DaemonResponse{OK: true, Data: map[string]any{"action": req.Action}}
-				if req.Action == "ping" {
+				switch req.Action {
+				case "ping":
 					resp.Data = map[string]any{"pong": true}
+				case "exec":
+					// The launcher asks the remote for its working directory.
+					resp.Data = map[string]any{"stdout": mockRemoteHome + "\n", "exit_code": float64(0)}
+				case "mount", "unmount":
+					local, _ := req.Params["local_path"].(string)
+					remote, _ := req.Params["remote_path"].(string)
+					mockDaemonCalls.record(req.Action, local, remote)
+					resp.Data = map[string]any{
+						"local_path":  local,
+						"remote_path": remote,
+						"mounted":     req.Action == "mount",
+					}
 				}
 				json.NewEncoder(c).Encode(resp)
 			}(conn)
@@ -176,9 +226,9 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	defer cleanup()
 
 	var gotEnv, gotArgs []string
-	var gotBin string
-	runClaudeFunc = func(bin string, args, env []string) error {
-		gotBin, gotArgs, gotEnv = bin, args, env
+	var gotBin, gotDir string
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
+		gotBin, gotArgs, gotEnv, gotDir = bin, args, env, dir
 		return nil
 	}
 	defer func() { runClaudeFunc = runClaudeProcess }()
@@ -191,6 +241,7 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	defer func() { startDaemonFunc = startDaemonProcess }()
 
 	shimDir := t.TempDir()
+	mockDaemonCalls.reset()
 	err := LaunchClaude(LaunchOptions{
 		Target:     target,
 		ClaudeBin:  fakeClaudeBin(t),
@@ -199,45 +250,22 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The remote toolset flags are prepended; the user's own args follow.
-	configPath := filepath.Join(shimDir, "remote-agent-claude-mcp.json")
-	assert.Equal(t, []string{
-		"--mcp-config=" + configPath,
-		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
-		"--allowedTools=" + strings.Join(preAllowedRemoteTools, ","),
-		"--model", "opus",
-	}, gotArgs)
-	// Every flag uses the "=" form: claude declares these options variadic, so
-	// a space-separated value would swallow the user's own arguments.
-	for _, arg := range gotArgs[:3] {
-		assert.Contains(t, arg, "=", "remote toolset flags must bind their value with '='")
-	}
-	// Only read-only tools are pre-allowed; mutations still prompt.
-	allowed := gotArgs[2]
-	assert.Contains(t, allowed, "mcp__remote__read_file")
-	assert.NotContains(t, allowed, "write_file")
-	assert.NotContains(t, allowed, "edit_file")
-	assert.NotEmpty(t, gotBin)
+	// Mounting is the default, so claude's own tools are left alone: no tool
+	// is disabled and no replacement toolset is registered.
+	assert.Equal(t, []string{"--model", "opus"}, gotArgs,
+		"a mounted session must not touch claude's tool configuration")
 
-	// The MCP config points claude at this binary's `mcp` subcommand, pinned
-	// to the daemon socket for this launch.
-	data, err := os.ReadFile(configPath)
-	require.NoError(t, err)
-	var config struct {
-		MCPServers map[string]struct {
-			Type    string            `json:"type"`
-			Command string            `json:"command"`
-			Args    []string          `json:"args"`
-			Env     map[string]string `json:"env"`
-		} `json:"mcpServers"`
-	}
-	require.NoError(t, json.Unmarshal(data, &config))
-	server, ok := config.MCPServers[mcpServerName]
-	require.True(t, ok, "config should define the %q server", mcpServerName)
-	assert.Equal(t, "stdio", server.Type)
-	assert.Equal(t, []string{"mcp"}, server.Args)
-	assert.NotEmpty(t, server.Command)
-	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
+	// The remote home is mounted at the identical local path, and claude runs
+	// there, so file tools and shell commands agree on what a path means.
+	calls := mockDaemonCalls.snapshot()
+	require.NotEmpty(t, calls)
+	assert.Equal(t, mountCall{Action: "mount", Local: mockRemoteHome, Remote: mockRemoteHome}, calls[0])
+	assert.Equal(t, mockRemoteHome, gotDir, "claude must run in the mount")
+
+	// The mount is released when claude exits.
+	require.Len(t, calls, 2)
+	assert.Equal(t, mountCall{Action: "unmount", Local: mockRemoteHome}, calls[1])
+	assert.NotEmpty(t, gotBin)
 
 	env := map[string]string{}
 	for _, e := range gotEnv {
@@ -269,7 +297,7 @@ func TestLaunchClaudeStartsAndStopsDaemon(t *testing.T) {
 	}()
 
 	ranClaude := false
-	runClaudeFunc = func(bin string, args, env []string) error {
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
 		ranClaude = true
 		return nil
 	}
@@ -304,7 +332,200 @@ func TestStartDaemonProcess(t *testing.T) {
 }
 
 func TestRunClaudeProcess(t *testing.T) {
-	assert.NoError(t, runClaudeProcess("/bin/true", nil, os.Environ()))
+	assert.NoError(t, runClaudeProcess("/bin/true", nil, os.Environ(), ""))
+}
+
+// TestLaunchClaudeNoMountFallsBackToRemoteTools covers the FUSE-less path:
+// without a mount, the built-in file tools would act on the local machine, so
+// they are replaced by the MCP toolset instead.
+func TestLaunchClaudeNoMountFallsBackToRemoteTools(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	target := "root@nomount-host"
+	sockPath := daemon.SocketPath(target)
+	cleanup := startPongDaemon(t, sockPath)
+	defer cleanup()
+
+	var gotArgs []string
+	var gotDir string
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
+		gotArgs, gotDir = args, dir
+		return nil
+	}
+	defer func() { runClaudeFunc = runClaudeProcess }()
+
+	shimDir := t.TempDir()
+	mockDaemonCalls.reset()
+	require.NoError(t, LaunchClaude(LaunchOptions{
+		Target:     target,
+		ClaudeBin:  fakeClaudeBin(t),
+		ClaudeArgs: []string{"--model", "opus"},
+		ShimDir:    shimDir,
+		NoMount:    true,
+	}))
+
+	assert.Empty(t, mockDaemonCalls.snapshot(), "--no-mount must not mount anything")
+	assert.Empty(t, gotDir, "without a mount there is no remote working directory to run in")
+
+	configPath := filepath.Join(shimDir, "remote-agent-claude-mcp.json")
+	assert.Equal(t, []string{
+		"--mcp-config=" + configPath,
+		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
+		"--allowedTools=" + strings.Join(preAllowedRemoteTools, ","),
+		"--model", "opus",
+	}, gotArgs)
+	// Every flag uses the "=" form: claude declares these options variadic, so
+	// a space-separated value would swallow the user's own arguments.
+	for _, arg := range gotArgs[:3] {
+		assert.Contains(t, arg, "=", "remote toolset flags must bind their value with '='")
+	}
+
+	// The MCP config points claude at this binary's `mcp` subcommand, pinned
+	// to the daemon socket for this launch.
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	var config struct {
+		MCPServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &config))
+	server, ok := config.MCPServers[mcpServerName]
+	require.True(t, ok, "config should define the %q server", mcpServerName)
+	assert.Equal(t, "stdio", server.Type)
+	assert.Equal(t, []string{"mcp"}, server.Args)
+	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
+}
+
+// TestLaunchClaudeNoMountLocalTools leaves claude's tools entirely alone.
+func TestLaunchClaudeNoMountLocalTools(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	target := "root@localtools-host"
+	sockPath := daemon.SocketPath(target)
+	cleanup := startPongDaemon(t, sockPath)
+	defer cleanup()
+
+	var gotArgs []string
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
+		gotArgs = args
+		return nil
+	}
+	defer func() { runClaudeFunc = runClaudeProcess }()
+
+	require.NoError(t, LaunchClaude(LaunchOptions{
+		Target:     target,
+		ClaudeBin:  fakeClaudeBin(t),
+		ClaudeArgs: []string{"--model", "opus"},
+		ShimDir:    t.TempDir(),
+		NoMount:    true,
+		LocalTools: true,
+	}))
+	assert.Equal(t, []string{"--model", "opus"}, gotArgs)
+}
+
+// TestLaunchClaudeMountAt puts the mount somewhere other than the remote path.
+func TestLaunchClaudeMountAt(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	target := "root@mountat-host"
+	sockPath := daemon.SocketPath(target)
+	cleanup := startPongDaemon(t, sockPath)
+	defer cleanup()
+
+	var gotEnv []string
+	var gotDir string
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
+		gotEnv, gotDir = env, dir
+		return nil
+	}
+	defer func() { runClaudeFunc = runClaudeProcess }()
+
+	mountAt := filepath.Join(t.TempDir(), "mnt")
+	mockDaemonCalls.reset()
+	require.NoError(t, LaunchClaude(LaunchOptions{
+		Target:    target,
+		ClaudeBin: fakeClaudeBin(t),
+		ShimDir:   t.TempDir(),
+		RemoteDir: "/srv/app",
+		MountAt:   mountAt,
+	}))
+
+	calls := mockDaemonCalls.snapshot()
+	require.NotEmpty(t, calls)
+	assert.Equal(t, mountCall{Action: "mount", Local: mountAt, Remote: "/srv/app"}, calls[0])
+	assert.Equal(t, mountAt, gotDir)
+
+	// Paths differ between the two halves, so the shim must NOT cd forwarded
+	// commands into a local path the remote does not have.
+	env := map[string]string{}
+	for _, e := range gotEnv {
+		k, v, _ := splitEnv(e)
+		env[k] = v
+	}
+	_, set := env["REMOTE_AGENT_MOUNT"]
+	assert.False(t, set, "REMOTE_AGENT_MOUNT is only valid when the mount point matches the remote path")
+}
+
+// TestLaunchClaudeMountFailureIsFatal: a failed mount must stop the launch,
+// not silently continue with tools pointed at the local machine.
+func TestLaunchClaudeMountFailureIsFatal(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	target := "root@badmount-host"
+	sockPath := daemon.SocketPath(target)
+	cleanup := startErrorMountDaemon(t, sockPath)
+	defer cleanup()
+
+	ran := false
+	runClaudeFunc = func(bin string, args, env []string, dir string) error {
+		ran = true
+		return nil
+	}
+	defer func() { runClaudeFunc = runClaudeProcess }()
+
+	err := LaunchClaude(LaunchOptions{
+		Target:    target,
+		ClaudeBin: fakeClaudeBin(t),
+		ShimDir:   t.TempDir(),
+		RemoteDir: "/srv/app",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-mount", "the error should point at the way out")
+	assert.False(t, ran, "claude must not start when the mount failed")
+}
+
+// startErrorMountDaemon answers ping and exec, but refuses to mount.
+func startErrorMountDaemon(t *testing.T, sockPath string) func() {
+	t.Helper()
+	l, err := net.Listen("unix", sockPath)
+	require.NoError(t, err)
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				var req protocol.DaemonRequest
+				if json.NewDecoder(c).Decode(&req) != nil {
+					return
+				}
+				resp := protocol.DaemonResponse{OK: true, Data: map[string]any{}}
+				switch req.Action {
+				case "ping":
+					resp.Data = map[string]any{"pong": true}
+				case "exec":
+					resp.Data = map[string]any{"stdout": "/srv/app\n", "exit_code": float64(0)}
+				case "mount":
+					resp = protocol.DaemonResponse{Error: "mount point /srv/app is not empty"}
+				}
+				json.NewEncoder(c).Encode(resp)
+			}(conn)
+		}
+	}()
+	return func() { l.Close() }
 }
 
 // TestShimForwardsToClaudeShim proves that the embedded shim, when invoked the

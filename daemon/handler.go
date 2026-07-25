@@ -28,6 +28,12 @@ func (h *Handler) Handle(req *protocol.DaemonRequest) *protocol.DaemonResponse {
 		return h.handleEdit(req.Params)
 	case "ls":
 		return h.handleLs(req.Params)
+	case "mount":
+		return h.daemon.handleMountAction(req.Params)
+	case "unmount":
+		return h.daemon.handleUnmountAction(req.Params)
+	case "mounts":
+		return h.daemon.handleMountsAction()
 	case "glob":
 		return h.handleGlob(req.Params)
 	case "grep":

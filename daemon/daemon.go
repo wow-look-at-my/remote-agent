@@ -38,6 +38,8 @@ type Daemon struct {
 	lastActivity time.Time      // time of the last client request start/finish (guarded by mu)
 	activeOps    int            // number of requests currently being handled (guarded by mu)
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
+	mounts       mountRegistry  // filesystem mounts this daemon owns
+	streamFunc   streamStarter  // test seam for opening a mount's transport
 }
 
 // opStart records that a client request began handling. The idle watchdog
@@ -152,6 +154,7 @@ func Start(target string, port int) error {
 	runner.Run(auditCmd)
 
 	d := &Daemon{
+		mounts:       mountRegistry{mounts: map[string]*mountEntry{}},
 		conn:         conn,
 		runner:       runner,
 		remotePath:   remotePath,
@@ -254,7 +257,10 @@ func (d *Daemon) watchIdle() {
 		idle := time.Since(d.lastActivity)
 		busy := d.activeOps > 0
 		d.mu.Unlock()
-		if !busy && idle > idleTimeout {
+		// A live mount is state the user is relying on: unmounting it because
+		// nobody ran a command for a while would break every process with a
+		// file open under it, so mounts hold the daemon open.
+		if !busy && !d.hasMounts() && idle > idleTimeout {
 			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
 			d.shutdown()
 			exitFunc(0)
@@ -264,6 +270,11 @@ func (d *Daemon) watchIdle() {
 }
 
 func (d *Daemon) shutdown() {
+	// Detach mounts first: they run over the SSH connection this is about to
+	// close, and a mountpoint whose backing connection is gone hangs every
+	// process that touches it.
+	d.unmountAll()
+
 	// Drain in-flight async audit writes before the shutdown audit/cleanup so
 	// no entries are lost and the shutdown entry stays last.
 	d.auditWG.Wait()

@@ -93,6 +93,24 @@ type GrepResult struct {
 	Truncated bool `json:"truncated,omitempty"`
 }
 
+// MountResult is returned by the mount and unmount actions.
+type MountResult struct {
+	LocalPath  string `json:"local_path"`
+	RemotePath string `json:"remote_path"`
+	Mounted    bool   `json:"mounted"`
+}
+
+// MountInfo describes one live mount.
+type MountInfo struct {
+	LocalPath  string `json:"local_path"`
+	RemotePath string `json:"remote_path"`
+}
+
+// MountList is returned by the mounts action.
+type MountList struct {
+	Mounts []MountInfo `json:"mounts"`
+}
+
 // DirEntry represents a single directory listing entry.
 type DirEntry struct {
 	Name    string `json:"name"`
