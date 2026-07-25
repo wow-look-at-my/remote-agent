@@ -72,6 +72,9 @@ func (d *Daemon) mount(localPath, remotePath string, allowOther bool) error {
 	if err := prepareMountpoint(localPath); err != nil {
 		return err
 	}
+	if err := refuseSelfMount(d.runner, localPath, remotePath); err != nil {
+		return err
+	}
 
 	command := fmt.Sprintf("%s serve fs --root %s", d.remotePath, shellEscape(remotePath))
 	stream, err := d.startStream(command)
@@ -190,6 +193,43 @@ func (d *Daemon) unmountAll() {
 			fmt.Fprintf(os.Stderr, "warning: could not unmount %s: %v\n", path, err)
 		}
 	}
+}
+
+// refuseSelfMount rejects mounting a remote directory onto itself, which
+// happens when the "remote" is this same machine (a loopback SSH target, a
+// container sharing the host's filesystem) and the mount point is the remote
+// path. The helper would then serve the mount point through the mount, and
+// every access recurses into a hang -- a failure that is both easy to trigger
+// while testing and unpleasant to recover from.
+//
+// The check drops a marker in the local mount point and asks the remote
+// whether it can see it. A remote that cannot be asked (no runner) is assumed
+// to be a genuinely different machine.
+func refuseSelfMount(runner Runner, localPath, remotePath string) error {
+	if runner == nil {
+		return nil
+	}
+	marker := filepath.Join(localPath, ".remote-agent-mount-check-"+randomSuffix())
+	f, err := os.Create(marker)
+	if err != nil {
+		// Cannot write the probe: leave the decision to the mount itself
+		// rather than refusing a mount that might be perfectly fine.
+		return nil
+	}
+	f.Close()
+	defer os.Remove(marker)
+
+	probe := fmt.Sprintf("test -e %s && echo same", shellEscape(filepath.Join(remotePath, filepath.Base(marker))))
+	stdout, _, _, err := runner.Run(probe)
+	if err != nil {
+		return nil
+	}
+	if strings.TrimSpace(string(stdout)) == "same" {
+		return fmt.Errorf("%s on the remote is the same directory as the local mount point %s; "+
+			"mounting it over itself would recurse. Use --mount-at (or a different mount point) to keep them apart",
+			remotePath, localPath)
+	}
+	return nil
 }
 
 // prepareMountpoint makes sure localPath is a usable mount point: an existing

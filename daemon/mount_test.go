@@ -239,3 +239,34 @@ func TestPrepareMountpoint(t *testing.T) {
 	// An existing empty one is accepted.
 	require.NoError(t, prepareMountpoint(t.TempDir()))
 }
+
+func TestDaemonRefusesToMountADirectoryOverItself(t *testing.T) {
+	requireFUSE(t)
+	// Simulate a remote that is this same machine: the probe file the daemon
+	// drops in the mount point is visible at the "remote" path, because they
+	// are one directory.
+	shared := t.TempDir()
+	d := newMountDaemon(t, shared)
+	runner := d.runner.(*mockRunner)
+	runner.defaultResponse = mockResponse{stdout: []byte("same\n")}
+
+	resp := d.handleMountAction(map[string]any{"local_path": shared, "remote_path": shared})
+	require.False(t, resp.OK)
+	assert.Contains(t, resp.Error, "same directory")
+	assert.Contains(t, resp.Error, "--mount-at")
+
+	// The probe file is cleaned up either way.
+	entries, err := os.ReadDir(shared)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "the self-mount probe must not be left behind")
+}
+
+func TestDaemonMountProceedsWhenRemoteIsDifferent(t *testing.T) {
+	requireFUSE(t)
+	remote := t.TempDir()
+	d := newMountDaemon(t, remote)
+	// The mock runner answers with nothing, i.e. the probe file is not
+	// visible remotely: a genuinely different machine.
+	mnt := filepath.Join(t.TempDir(), "mnt")
+	assert.True(t, d.handleMountAction(map[string]any{"local_path": mnt, "remote_path": "/"}).OK)
+}
