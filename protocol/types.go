@@ -39,6 +39,58 @@ type WriteResult struct {
 type EditResult struct {
 	Modified bool   `json:"modified"`
 	Message  string `json:"message,omitempty"`
+	// Replacements counts how many occurrences were replaced (1 unless the
+	// edit was a replace-all).
+	Replacements int `json:"replacements,omitempty"`
+}
+
+// GlobResult is returned by the glob action: remote paths matching a glob
+// pattern, most recently modified first.
+type GlobResult struct {
+	Pattern string   `json:"pattern"`
+	Path    string   `json:"path"`
+	Files   []string `json:"files"`
+	// Truncated reports that more files matched than the requested limit.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// Grep output modes.
+const (
+	GrepModeContent = "content"            // matching lines
+	GrepModeFiles   = "files_with_matches" // paths only
+	GrepModeCount   = "count"              // per-file match counts
+)
+
+// GrepMatch is a single line emitted by a content-mode grep. Context lines
+// (from the context_lines option) carry IsContext so they can be rendered
+// differently from real matches.
+type GrepMatch struct {
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	Text      string `json:"text"`
+	IsContext bool   `json:"is_context,omitempty"`
+}
+
+// GrepFileCount is a per-file match count emitted by a count-mode grep.
+type GrepFileCount struct {
+	Path  string `json:"path"`
+	Count int    `json:"count"`
+}
+
+// GrepResult is returned by the grep action. Which field carries the payload
+// depends on Mode: Matches for content, Files for files_with_matches, Counts
+// for count.
+type GrepResult struct {
+	Pattern string          `json:"pattern"`
+	Mode    string          `json:"mode"`
+	Matches []GrepMatch     `json:"matches,omitempty"`
+	Files   []string        `json:"files,omitempty"`
+	Counts  []GrepFileCount `json:"counts,omitempty"`
+	// FilesScanned counts the files actually searched (binary files and
+	// files excluded by the include pattern are not counted).
+	FilesScanned int `json:"files_scanned"`
+	// Truncated reports that output was cut off at the requested limit.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // DirEntry represents a single directory listing entry.

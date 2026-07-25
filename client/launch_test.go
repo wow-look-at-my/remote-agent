@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,8 +199,34 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"--model", "opus"}, gotArgs)
+	// The remote toolset flags are prepended; the user's own args follow.
+	configPath := filepath.Join(shimDir, "remote-agent-claude-mcp.json")
+	assert.Equal(t, []string{
+		"--mcp-config=" + configPath,
+		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
+		"--model", "opus",
+	}, gotArgs)
 	assert.NotEmpty(t, gotBin)
+
+	// The MCP config points claude at this binary's `mcp` subcommand, pinned
+	// to the daemon socket for this launch.
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	var config struct {
+		MCPServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &config))
+	server, ok := config.MCPServers[mcpServerName]
+	require.True(t, ok, "config should define the %q server", mcpServerName)
+	assert.Equal(t, "stdio", server.Type)
+	assert.Equal(t, []string{"mcp"}, server.Args)
+	assert.NotEmpty(t, server.Command)
+	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
 
 	env := map[string]string{}
 	for _, e := range gotEnv {

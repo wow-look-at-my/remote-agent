@@ -15,10 +15,11 @@ var serveEditCmd = &cobra.Command{
 		path, _ := cmd.Flags().GetString("path")
 		oldText, _ := cmd.Flags().GetString("old")
 		newText, _ := cmd.Flags().GetString("new")
+		replaceAll, _ := cmd.Flags().GetBool("replace-all")
 		if path == "" || oldText == "" {
 			return fmt.Errorf("--path and --old flags are required")
 		}
-		return agent.ServeEdit(path, oldText, newText)
+		return agent.ServeEdit(path, oldText, newText, replaceAll)
 	},
 }
 
@@ -27,4 +28,5 @@ func init() {
 	serveEditCmd.Flags().String("path", "", "file path to edit")
 	serveEditCmd.Flags().String("old", "", "text to find")
 	serveEditCmd.Flags().String("new", "", "replacement text")
+	serveEditCmd.Flags().Bool("replace-all", false, "replace every occurrence instead of requiring a unique match")
 }

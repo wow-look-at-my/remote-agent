@@ -296,13 +296,36 @@ func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 // keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.
 var keepAliveInterval = 30 * time.Second
 
+// keepAlive pings the remote every interval so idle NAT/firewall state does
+// not drop the connection, and stops as soon as the connection is gone.
+//
+// The ping deliberately does NOT request a reply, and the loop watches
+// client.Wait() rather than relying on SendRequest to report the disconnect.
+// A reply-wanting global request is unusable here: golang.org/x/crypto/ssh
+// (v0.52) drains buffered responses with `select { case <-m.globalResponses:
+// default: }`, and once the connection closes that channel is closed, so the
+// receive is always ready and the drain loop spins forever at 100% CPU
+// instead of returning an error (ssh/mux.go:158). A no-reply ping returns the
+// write error directly, and client.Wait() covers a write that lands in a dead
+// socket's buffer.
 func keepAlive(client *ssh.Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		_, _, err := client.SendRequest("keepalive@remote-agent", true, nil)
-		if err != nil {
+
+	closed := make(chan struct{})
+	go func() {
+		client.Wait()
+		close(closed)
+	}()
+
+	for {
+		select {
+		case <-closed:
 			return
+		case <-ticker.C:
+			if _, _, err := client.SendRequest("keepalive@remote-agent", false, nil); err != nil {
+				return
+			}
 		}
 	}
 }

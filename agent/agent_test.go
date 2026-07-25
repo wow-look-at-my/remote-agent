@@ -64,7 +64,7 @@ func TestServeEdit(t *testing.T) {
 	os.WriteFile(path, []byte("hello world"), 0644)
 
 	output := captureStdout(t, func() {
-		ServeEdit(path, "hello", "goodbye")
+		ServeEdit(path, "hello", "goodbye", false)
 	})
 
 	var result protocol.EditResult
@@ -81,7 +81,7 @@ func TestServeEditNotFound(t *testing.T) {
 	os.WriteFile(path, []byte("hello"), 0644)
 
 	output := captureStdout(t, func() {
-		ServeEdit(path, "missing", "x")
+		ServeEdit(path, "missing", "x", false)
 	})
 
 	var result map[string]string

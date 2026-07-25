@@ -28,6 +28,10 @@ func (h *Handler) Handle(req *protocol.DaemonRequest) *protocol.DaemonResponse {
 		return h.handleEdit(req.Params)
 	case "ls":
 		return h.handleLs(req.Params)
+	case "glob":
+		return h.handleGlob(req.Params)
+	case "grep":
+		return h.handleGrep(req.Params)
 	case "readlink":
 		return h.handleReadlink(req.Params)
 	case "ps":

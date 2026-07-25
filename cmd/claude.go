@@ -10,13 +10,20 @@ import (
 var claudeCmd = &cobra.Command{
 	Use:   "claude [user@host] [-- claude-args...]",
 	Short: "Launch Claude Code with its shell wired to run on the remote host",
-	Long: `Launch Claude Code so that every Bash tool command it runs executes on a
-remote host through the remote-agent daemon, instead of locally.
+	Long: `Launch Claude Code so that every Bash tool command and every file operation
+it performs executes on a remote host through the remote-agent daemon, instead
+of locally.
 
 It starts (or reuses) a daemon for the target, then runs claude with
 CLAUDE_CODE_SHELL_PREFIX pointed at a shim that forwards each command to the
 remote. The model never has to think about SSH -- it just runs ordinary shell
 commands and they land on the remote machine.
+
+Claude's built-in file tools (Read, Write, Edit, Glob, Grep, ...) call the
+local filesystem directly and cannot be redirected, so they are switched off
+and replaced by an MCP toolset that performs the same operations on the remote
+host. Pass --local-tools to keep the built-ins instead (Bash still runs
+remotely).
 
 The optional positional argument is the SSH target (user@host). If omitted, a
 single already-running daemon is reused. Anything after "--" is passed straight
@@ -32,6 +39,7 @@ Examples:
 		port, _ := cmd.Flags().GetInt("port")
 		keep, _ := cmd.Flags().GetBool("keep-daemon")
 		claudeBin, _ := cmd.Flags().GetString("claude-bin")
+		localTools, _ := cmd.Flags().GetBool("local-tools")
 
 		// Positional args before "--" are the optional target; args after "--"
 		// are passed through to claude.
@@ -59,6 +67,7 @@ Examples:
 			ClaudeBin:  claudeBin,
 			ClaudeArgs: claudeArgs,
 			KeepDaemon: keep,
+			LocalTools: localTools,
 		})
 	},
 }
@@ -68,4 +77,5 @@ func init() {
 	claudeCmd.Flags().Int("port", 22, "SSH port used when starting a fresh daemon")
 	claudeCmd.Flags().Bool("keep-daemon", false, "keep the daemon running after claude exits (only if this command started it)")
 	claudeCmd.Flags().String("claude-bin", "claude", "path or name of the claude executable")
+	claudeCmd.Flags().Bool("local-tools", false, "keep Claude's built-in file tools (acting on the local machine) instead of the remote MCP toolset")
 }

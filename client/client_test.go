@@ -165,7 +165,7 @@ func TestEdit(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
-		assert.NoError(t, Edit("/remote/file", "hello", "world"))
+		assert.NoError(t, Edit("/remote/file", "hello", "world", false))
 	})
 }
 
@@ -293,7 +293,7 @@ func TestWriteDaemonError(t *testing.T) {
 func TestEditDaemonError(t *testing.T) {
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
-	err := Edit("/remote/file", "a", "b")
+	err := Edit("/remote/file", "a", "b", false)
 	assert.NotNil(t, err)
 }
 
@@ -719,7 +719,7 @@ func TestWriteNoSocket(t *testing.T) {
 
 func TestEditNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	assert.NotNil(t, Edit("/path", "a", "b"))
+	assert.NotNil(t, Edit("/path", "a", "b", false))
 }
 
 func TestLsNoSocket(t *testing.T) {

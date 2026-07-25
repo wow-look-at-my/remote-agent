@@ -2,6 +2,7 @@ package client
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,7 +27,24 @@ type LaunchOptions struct {
 	ClaudeArgs []string // extra arguments passed through to claude
 	KeepDaemon bool     // keep a daemon we started running after claude exits
 	ShimDir    string   // directory for the shim + daemon log (default os.TempDir())
+	// LocalTools keeps Claude Code's built-in filesystem tools (which act on
+	// the LOCAL machine) instead of replacing them with the remote MCP
+	// toolset. Off by default: in a remote session a local Read or Write is
+	// almost always the wrong machine.
+	LocalTools bool
 }
+
+// disabledLocalTools are the built-in Claude Code tools that reach the local
+// filesystem directly. They have no shell-prefix hook -- they call Node's fs
+// against the machine Claude runs on -- so the only way to keep a remote
+// session honest is to take them out of the tool set and hand the model the
+// remote MCP equivalents instead. Names that a given Claude version does not
+// define are simply ignored by --disallowedTools.
+var disabledLocalTools = []string{"Read", "Write", "Edit", "MultiEdit", "NotebookRead", "NotebookEdit", "Glob", "Grep"}
+
+// mcpServerName is the MCP server name Claude prefixes onto every remote tool
+// (mcp__remote__read_file, ...).
+const mcpServerName = "remote"
 
 // Test seams so the orchestration can be exercised without a real daemon/claude.
 var (
@@ -69,8 +87,18 @@ func LaunchClaude(opts LaunchOptions) error {
 		"REMOTE_AGENT_SOCKET":      sockPath,
 	})
 
-	fmt.Fprintf(os.Stderr, "Launching claude; Bash commands will run on the remote host.\n")
-	runErr := runClaudeFunc(resolved, opts.ClaudeArgs, env)
+	claudeArgs := opts.ClaudeArgs
+	if opts.LocalTools {
+		fmt.Fprintf(os.Stderr, "Launching claude; Bash commands will run on the remote host (file tools stay local).\n")
+	} else {
+		configPath, err := writeMCPConfig(tmpDir(opts.ShimDir), self, sockPath)
+		if err != nil {
+			return fmt.Errorf("write MCP config: %w", err)
+		}
+		claudeArgs = append(remoteToolArgs(configPath), claudeArgs...)
+		fmt.Fprintf(os.Stderr, "Launching claude; Bash commands and file tools will run on the remote host.\n")
+	}
+	runErr := runClaudeFunc(resolved, claudeArgs, env)
 
 	if startedDaemon && !opts.KeepDaemon {
 		fmt.Fprintf(os.Stderr, "Stopping remote-agent daemon...\n")
@@ -179,6 +207,51 @@ func disconnectSocket(sockPath string) error {
 		return fmt.Errorf("%s", resp.Error)
 	}
 	return nil
+}
+
+// remoteToolArgs returns the claude flags that swap the built-in local file
+// tools for the remote MCP toolset.
+//
+// Both flags use the "--flag=value" form deliberately: claude declares
+// --mcp-config and --disallowedTools as variadic options, so in the
+// space-separated form they would swallow every following argument -- including
+// the user's own prompt. The "=" form binds exactly one value.
+func remoteToolArgs(configPath string) []string {
+	return []string{
+		"--mcp-config=" + configPath,
+		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
+	}
+}
+
+// writeMCPConfig writes the MCP server definition that points claude at this
+// binary's `mcp` subcommand, and returns its path. The server runs on the
+// local machine (claude spawns it through the shell-prefix shim, which routes
+// MCP servers locally) and reaches the remote host through the daemon socket.
+func writeMCPConfig(dir, self, sockPath string) (string, error) {
+	config := map[string]any{
+		"mcpServers": map[string]any{
+			mcpServerName: map[string]any{
+				"type":    "stdio",
+				"command": self,
+				"args":    []string{"mcp"},
+				// Pinned explicitly so the tools reach this launch's daemon
+				// even if the environment is scrubbed or several daemons run.
+				"env": map[string]string{
+					"REMOTE_AGENT_BIN":    self,
+					"REMOTE_AGENT_SOCKET": sockPath,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "remote-agent-claude-mcp.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // writeShim writes the embedded shell-prefix shim into dir and returns its path.

@@ -79,221 +79,40 @@ func findSocket() (string, error) {
 	}
 }
 
-// printResponse outputs the daemon response to stdout.
-// When OutputJSON is true, outputs indented JSON. Otherwise outputs compact text.
-func printResponse(resp *protocol.DaemonResponse, action string) error {
+// Call sends an action to the daemon and decodes the response payload into
+// out (which may be nil when only success matters). It is the programmatic
+// counterpart to the printing helpers below: the MCP server needs the
+// structured result, not text on stdout.
+func Call(action string, params map[string]any, out any) error {
+	resp, err := sendRequest(&protocol.DaemonRequest{Action: action, Params: params})
+	if err != nil {
+		return err
+	}
 	if resp.Error != "" {
 		return fmt.Errorf("%s", resp.Error)
 	}
-
-	if OutputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(resp.Data)
-	}
-
-	return printTextResponse(resp.Data, action)
-}
-
-// printTextResponse formats the response data as compact text based on the action type.
-func printTextResponse(data any, action string) error {
-	m, _ := data.(map[string]any)
-	if m == nil {
-		fmt.Fprintln(os.Stdout, data)
+	if out == nil {
 		return nil
 	}
-
-	switch action {
-	case "exec":
-		return printExecText(m)
-	case "read":
-		return printReadText(m)
-	case "write", "upload", "download":
-		return printWriteText(m)
-	case "edit":
-		return printEditText(m)
-	case "ls":
-		return printLsText(m)
-	case "readlink":
-		return printReadlinkText(m)
-	case "ps":
-		return printPsText(m)
-	case "sysinfo":
-		return printSysinfoText(m)
-	case "ping":
-		return printPingText(m)
-	case "disconnect":
-		fmt.Fprintln(os.Stdout, "disconnecting")
-		return nil
-	default:
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(data)
+	// The payload arrives as decoded JSON (map/slice values); round-trip it
+	// into the caller's typed struct rather than hand-asserting every field.
+	data, err := json.Marshal(resp.Data)
+	if err != nil {
+		return fmt.Errorf("encode %s result: %w", action, err)
 	}
-}
-
-func printExecText(m map[string]any) error {
-	stdout, _ := m["stdout"].(string)
-	stderr, _ := m["stderr"].(string)
-
-	// Forward stdout to stdout and stderr to stderr unconditionally so the
-	// command behaves like a transparent shell. The remote exit code is
-	// propagated by the caller as this process's own exit code (see cmd/exec.go),
-	// so no "[exit N]" marker is printed.
-	if stdout != "" {
-		fmt.Fprint(os.Stdout, stdout)
-	}
-	if stderr != "" {
-		fmt.Fprint(os.Stderr, stderr)
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("decode %s result: %w", action, err)
 	}
 	return nil
 }
 
-func printReadText(m map[string]any) error {
-	// Binary files arrive base64-framed (JSON cannot carry invalid UTF-8);
-	// decode back to the exact original bytes.
-	if b64, _ := m["content_b64"].(string); b64 != "" {
-		data, err := base64.StdEncoding.DecodeString(b64)
-		if err != nil {
-			return fmt.Errorf("decode content_b64: %w", err)
-		}
-		_, err = os.Stdout.Write(data)
-		return err
-	}
-	content, _ := m["content"].(string)
-	fmt.Fprint(os.Stdout, content)
-	return nil
-}
+// DaemonBackend adapts the daemon client to the Backend interface the MCP
+// server expects, without either package importing the other.
+type DaemonBackend struct{}
 
-func printWriteText(m map[string]any) error {
-	bytes, _ := m["bytes_written"].(float64)
-	fmt.Fprintf(os.Stdout, "%d bytes written\n", int64(bytes))
-	return nil
-}
-
-func printEditText(m map[string]any) error {
-	modified, _ := m["modified"].(bool)
-	msg, _ := m["message"].(string)
-	if modified {
-		fmt.Fprint(os.Stdout, "modified")
-	} else {
-		fmt.Fprint(os.Stdout, "not modified")
-	}
-	if msg != "" {
-		fmt.Fprintf(os.Stdout, ": %s", msg)
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
-}
-
-func printLsText(m map[string]any) error {
-	entries, _ := m["entries"].([]any)
-	if entries == nil {
-		return nil
-	}
-
-	for _, e := range entries {
-		entry, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := entry["name"].(string)
-		size, _ := entry["size"].(float64)
-		mode, _ := entry["mode"].(string)
-		isDir, _ := entry["is_dir"].(bool)
-		isLink, _ := entry["is_link"].(bool)
-		target, _ := entry["target"].(string)
-
-		typeChar := "-"
-		if isDir {
-			typeChar = "d"
-		}
-		if isLink {
-			typeChar = "l"
-		}
-		if isLink && target != "" {
-			fmt.Fprintf(os.Stdout, "%s\t%s\t%d\t%s -> %s\n", typeChar, mode, int64(size), name, target)
-		} else {
-			fmt.Fprintf(os.Stdout, "%s\t%s\t%d\t%s\n", typeChar, mode, int64(size), name)
-		}
-	}
-	return nil
-}
-
-func printReadlinkText(m map[string]any) error {
-	target, _ := m["target"].(string)
-	fmt.Fprintln(os.Stdout, target)
-	return nil
-}
-
-func printPsText(m map[string]any) error {
-	processes, _ := m["processes"].([]any)
-	if processes == nil {
-		return nil
-	}
-
-	fmt.Fprintf(os.Stdout, "PID\tUSER\tSTATE\tRSS\tCOMMAND\n")
-	for _, p := range processes {
-		proc, ok := p.(map[string]any)
-		if !ok {
-			continue
-		}
-		pid, _ := proc["pid"].(float64)
-		user, _ := proc["user"].(string)
-		state, _ := proc["state"].(string)
-		rss, _ := proc["rss_bytes"].(float64)
-		cmd, _ := proc["command"].(string)
-		fmt.Fprintf(os.Stdout, "%d\t%s\t%s\t%d\t%s\n", int(pid), user, state, int64(rss), cmd)
-	}
-	return nil
-}
-
-func printSysinfoText(m map[string]any) error {
-	hostname, _ := m["hostname"].(string)
-	osName, _ := m["os"].(string)
-	arch, _ := m["arch"].(string)
-	uptime, _ := m["uptime"].(string)
-
-	fmt.Fprintf(os.Stdout, "%s %s %s up %s\n", hostname, osName, arch, uptime)
-
-	if cpu, ok := m["cpu"].(map[string]any); ok {
-		model, _ := cpu["model"].(string)
-		cores, _ := cpu["cores"].(float64)
-		threads, _ := cpu["threads"].(float64)
-		mhz, _ := cpu["mhz"].(float64)
-		fmt.Fprintf(os.Stdout, "cpu: %s %dc/%dt %.0fMHz\n", model, int(cores), int(threads), mhz)
-	}
-
-	if mem, ok := m["memory"].(map[string]any); ok {
-		total, _ := mem["total_bytes"].(float64)
-		avail, _ := mem["available_bytes"].(float64)
-		fmt.Fprintf(os.Stdout, "mem: %.1fG total %.1fG avail\n", total/1e9, avail/1e9)
-	}
-
-	if disks, ok := m["disk"].([]any); ok {
-		for _, d := range disks {
-			disk, ok := d.(map[string]any)
-			if !ok {
-				continue
-			}
-			mount, _ := disk["mount_point"].(string)
-			total, _ := disk["total_bytes"].(float64)
-			pct, _ := disk["use_pct"].(float64)
-			fmt.Fprintf(os.Stdout, "disk: %s %.1fG %.0f%%\n", mount, total/1e9, pct)
-		}
-	}
-
-	return nil
-}
-
-func printPingText(m map[string]any) error {
-	pong, _ := m["pong"].(bool)
-	if pong {
-		fmt.Fprintln(os.Stdout, "pong")
-	} else {
-		fmt.Fprintln(os.Stdout, "fail")
-	}
-	return nil
+// Call implements the MCP server's Backend interface.
+func (DaemonBackend) Call(action string, params map[string]any, out any) error {
+	return Call(action, params, out)
 }
 
 // Connect starts the daemon with the given target and SSH port.
@@ -401,20 +220,55 @@ func Write(path, mode string, content []byte) error {
 	return printResponse(resp, "write")
 }
 
-// Edit performs a find/replace in a remote file.
-func Edit(path, oldText, newText string) error {
+// Edit performs a find/replace in a remote file. Unless replaceAll is set the
+// text must occur exactly once, so an ambiguous edit fails instead of silently
+// changing the first match.
+func Edit(path, oldText, newText string, replaceAll bool) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "edit",
 		Params: map[string]any{
-			"path": path,
-			"old":  oldText,
-			"new":  newText,
+			"path":        path,
+			"old":         oldText,
+			"new":         newText,
+			"replace_all": replaceAll,
 		},
 	})
 	if err != nil {
 		return err
 	}
 	return printResponse(resp, "edit")
+}
+
+// Glob lists remote files matching a glob pattern, newest first.
+func Glob(pattern, path string, limit int) error {
+	resp, err := sendRequest(&protocol.DaemonRequest{
+		Action: "glob",
+		Params: map[string]any{"pattern": pattern, "path": path, "limit": limit},
+	})
+	if err != nil {
+		return err
+	}
+	return printResponse(resp, "glob")
+}
+
+// Grep searches remote files for a regular expression.
+func Grep(pattern, path, include, mode string, ignoreCase bool, context, limit int) error {
+	resp, err := sendRequest(&protocol.DaemonRequest{
+		Action: "grep",
+		Params: map[string]any{
+			"pattern":     pattern,
+			"path":        path,
+			"include":     include,
+			"mode":        mode,
+			"ignore_case": ignoreCase,
+			"context":     context,
+			"limit":       limit,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return printResponse(resp, "grep")
 }
 
 // Ls lists a remote directory.
