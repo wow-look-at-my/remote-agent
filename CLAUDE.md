@@ -21,9 +21,14 @@ through the daemon, while hook commands and MCP stdio servers run **locally**
 prefix wrapper shell-quotes the program name, so a multi-word prefix like
 `remote-agent claude-shim` would be treated as one executable name and fail.
 
-The launcher also swaps Claude's **file tools** onto the remote host: it
-registers `remote-agent mcp` (`mcpserver/`) as an MCP stdio server and disables
-the built-in local-filesystem tools (see Gotchas). `--local-tools` opts out.
+The launcher also **mounts the remote filesystem locally** (`remotefs/`,
+`fswire/`, `agent/fsserver_unix.go`) at the same absolute path the remote uses,
+and runs claude in it. That is what makes Claude's ordinary Read/Write/Edit/
+Glob/Grep -- and any other program, including third-party MCP servers and tools
+that do not exist yet -- operate on the remote host: access goes through the
+kernel, not through a tool-specific bridge. `--no-mount` falls back to serving
+the remote filesystem as MCP tools (`mcpserver/`), which only covers the tools
+remote-agent itself provides.
 
 ## Build, test, lint
 
@@ -35,6 +40,13 @@ build in one step, and downloads the pinned Go version itself.
 go-toolchain                 # tidy + vet + test (coverage) + build -> build/remote-agent
 go-toolchain --no-benchmark  # skip the benchmark phase (faster inner loop)
 ```
+
+The one dependency that needs care is `github.com/hanwen/go-fuse/v2`: the org
+module proxy does not serve its checksum-database entry, so `go mod tidy`
+through go-toolchain fails on a *new* version until go.sum has the hashes.
+Populate them once from the public proxy
+(`GOPROXY='https://proxy.golang.org,direct' GOSUMDB=sum.golang.org go mod tidy`)
+and commit go.sum; go-toolchain then never needs the sumdb.
 
 Do **not** run bare `go build` / `go test` / `go mod tidy`. Keep the tree
 gofmt-clean — `gofmt -l .` must print nothing. CI (`.github/workflows/build.yml`)
@@ -65,6 +77,11 @@ Three roles, one binary:
  remote-agent ls ─JSON req──▶  handler → ops          ─cmd─▶ ~/.cache/remote-agent/agent-xxx
                 ◀─JSON resp──   (one SSH connection)  ◀────  (hidden serve subcommands)
 ```
+
+A fourth path exists alongside these three: a **filesystem mount**. The daemon
+opens one long-lived SSH channel running `<remote-binary> serve fs`, speaks a
+framed protocol over it (`fswire/`), and exposes the result as a local FUSE
+mount (`remotefs/`). Ordinary programs then reach remote files by path.
 
 1. **CLI client** — `cmd/` (cobra, one command per file) builds a
    `protocol.DaemonRequest`; `client/client.go` sends it as JSON over a per-target
@@ -102,7 +119,9 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 | `client/` | Unix-socket client (`client.go`; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
 | `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing the remote filesystem as tools. `server.go` is the protocol layer, `tools.go` the tool declarations and their daemon calls. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
-| `agent/` | Remote-side system/process/file collectors and the search implementations (`glob.go`, `grep.go`); platform files selected by build tag. |
+| `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
+| `fswire/` | The mount's wire protocol: request/response types, length-prefixed framing with binary payloads, and portable open-flag translation. Standard library only, so both ends share it. |
+| `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
 | `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
 
@@ -165,14 +184,45 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   verbatim. Paths in both clauses may be bare OR single-quoted (Claude quotes
   only outside `[A-Za-z0-9_./:=@+,-]`); non-matching clauses are left
   untouched.
-- **Claude's file tools cannot be redirected — they are replaced.** Read,
-  Write, Edit, Glob and Grep call Node's `fs` against the machine claude runs
-  on (cli.js: the Read tool reads through the process-local fs accessor); there
-  is no file-tool equivalent of CLAUDE_CODE_SHELL_PREFIX, no env var, and no
-  hook that can rewrite where they land. `remote-agent claude` therefore passes
+- **Claude's file tools cannot be redirected, so the filesystem moves
+  instead.** Read, Write, Edit, Glob and Grep call Node's `fs` against the
+  machine claude runs on (cli.js: the Read tool reads through the
+  process-local fs accessor); there is no file-tool equivalent of
+  CLAUDE_CODE_SHELL_PREFIX, no env var, and no hook that can rewrite where
+  they land. Replacing them one by one with MCP tools only ever covers the
+  tools we enumerate — third-party MCP servers, editors and anything written
+  later still hit local disk. Mounting the remote filesystem covers all of
+  them at once, because every one of them goes through the kernel.
+- **The mount point defaults to the same absolute path as the remote
+  directory**, and claude runs there. That is not cosmetic: file tools reach
+  files through the mount (local paths) while Bash commands run over SSH
+  (remote paths), so if the two differ, one set of files has two names and the
+  model mixes them. `--mount-at` allows a different local path and the launcher
+  warns when it is used. When the paths do match, the launcher exports
+  `REMOTE_AGENT_MOUNT` and the shim prefixes each forwarded command with `cd
+  <cwd> &&`, which is what finally makes `cd` behave for the common case.
+- **A mount whose session has died is contagious.** Any process that so much
+  as stats it blocks in the kernel forever — `df`, shell tab-completion, an
+  unrelated test's statfs (this bit during development: a leaked mount from a
+  failed test hung the whole suite). Hence `ForceUnmount` (lazy detach via
+  `fusermount -uz`, falling back to `MNT_DETACH`) on every shutdown path, and
+  a bounded handshake (`remotefs.PingTimeout`) before a mount is ever handed
+  to the kernel.
+- **`O_APPEND` is stripped from the remote open** (`agent/fsserver_unix.go`).
+  Every read and write carries an explicit offset — the kernel resolves append
+  offsets before it sends the request — and pwrite on an O_APPEND descriptor
+  ignores that offset; Go rejects the combination outright, which surfaced as
+  EIO on every append through the mount.
+- **Open flags are translated, not passed through** (`fswire/openflags.go`).
+  O_APPEND is 0x8 on darwin and 0x400 on Linux, and O_TRUNC/O_EXCL differ too,
+  so raw flags on a cross-platform mount would silently truncate files.
+- **Mount caching is deliberately short**: 1s for attributes and entries, and
+  negative lookups are not cached at all, because a file a forwarded build
+  command just created has to be visible to the next read.
+- **--no-mount is the fallback path**, and only there does the launcher pass
   `--disallowedTools=Read,Write,Edit,NotebookEdit,Glob,Grep` (claude filters
-  denied tools out of the advertised tool set, so the model never sees them)
-  and registers `remote-agent mcp` via `--mcp-config`, whose tools carry the
+  denied tools out of the advertised set, so the model never sees them) and
+  register `remote-agent mcp` via `--mcp-config`, whose tools carry the
   `mcp__remote__` prefix. Only tools that exist are listed: an unknown name
   produces a "matches no known tool" warning at startup.
 - **The launcher's claude flags must use the `--flag=value` form.**
@@ -205,10 +255,10 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   Silently replacing the first of several occurrences is unusable for a model
   that cannot see which one changed; the error names the occurrence count so
   the caller knows to add context.
-- `cd` does not persist between Bash tool calls through the launcher: each
-  forwarded command runs as a one-shot exec on the remote (fresh login shell
-  in the remote home). Documented limitation — combine steps in a single
-  command (`cd /x && make`).
+- `cd` does not *persist* between Bash tool calls: each forwarded command is
+  still a one-shot exec on the remote. With a same-path mount the shim starts
+  each command in claude's working directory (see above), so relative paths
+  work; a `cd` inside one command still does not carry into the next.
 - Host-key verification has OpenSSH `accept-new` semantics (`sshutil/ssh.go`):
   an unknown host is trusted on first use and its key recorded in
   `~/.ssh/known_hosts`; a recorded host must present the same key or the
@@ -239,6 +289,7 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 3. A `handle<Name>` handler in `daemon/ops.go`, wired into the switch in
    `daemon/handler.go`.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
-5. If the model should be able to use it through `remote-agent claude`, add a
-   tool for it in `mcpserver/tools.go` (declaration + handler calling
-   `s.backend.Call`).
+5. If the model should be able to use it through `remote-agent claude
+   --no-mount`, add a tool for it in `mcpserver/tools.go` (declaration +
+   handler calling `s.backend.Call`). A mounted session needs nothing: the
+   model reaches files with its ordinary tools.

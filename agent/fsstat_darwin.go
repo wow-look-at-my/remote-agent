@@ -52,7 +52,7 @@ func statfs(path string) (*fswire.Statfs, error) {
 
 // mknod creates a device or FIFO node.
 func mknod(path string, mode, dev uint32) error {
-	return syscall.Mknod(path, uint16(mode), int32(dev))
+	return syscall.Mknod(path, mode, int(dev))
 }
 
 // utimes sets access and modification times, leaving unset ones untouched

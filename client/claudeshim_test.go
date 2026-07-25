@@ -362,3 +362,51 @@ func TestWriteCwdFileWarnsOnFailure(t *testing.T) {
 	// Writing into a nonexistent directory must warn, not panic or abort.
 	writeCwdFile(filepath.Join(t.TempDir(), "no-such-dir", "cwd"))
 }
+
+func TestPrefixWorkingDirectory(t *testing.T) {
+	mount := t.TempDir()
+	sub := filepath.Join(mount, "src")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	t.Run("no mount means no prefix", func(t *testing.T) {
+		t.Setenv("REMOTE_AGENT_MOUNT", "")
+		assert.Equal(t, "make build", prefixWorkingDirectory("make build"))
+	})
+
+	t.Run("inside the mount, the command runs there", func(t *testing.T) {
+		t.Setenv("REMOTE_AGENT_MOUNT", mount)
+		t.Chdir(sub)
+		got := prefixWorkingDirectory("make build")
+		// The path is quoted and joined with && so a failed cd aborts rather
+		// than running the command in the wrong directory.
+		assert.Equal(t, "cd '"+sub+"' && make build", got)
+	})
+
+	t.Run("at the mount root", func(t *testing.T) {
+		t.Setenv("REMOTE_AGENT_MOUNT", mount)
+		t.Chdir(mount)
+		assert.Equal(t, "cd '"+mount+"' && ls", prefixWorkingDirectory("ls"))
+	})
+
+	t.Run("outside the mount is left alone", func(t *testing.T) {
+		// A working directory that is not under the mount is not a valid
+		// remote path, so prefixing it would break every command.
+		t.Setenv("REMOTE_AGENT_MOUNT", mount)
+		t.Chdir(t.TempDir())
+		assert.Equal(t, "ls", prefixWorkingDirectory("ls"))
+	})
+
+	t.Run("a sibling directory with the same prefix is not inside", func(t *testing.T) {
+		sibling := mount + "-other"
+		require.NoError(t, os.MkdirAll(sibling, 0o755))
+		defer os.RemoveAll(sibling)
+		t.Setenv("REMOTE_AGENT_MOUNT", mount)
+		t.Chdir(sibling)
+		assert.Equal(t, "ls", prefixWorkingDirectory("ls"))
+	})
+}
+
+func TestShellQuote(t *testing.T) {
+	assert.Equal(t, "'/srv/app'", shellQuote("/srv/app"))
+	assert.Equal(t, `'/srv/it'"'"'s'`, shellQuote("/srv/it's"))
+}

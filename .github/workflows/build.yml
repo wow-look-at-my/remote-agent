@@ -14,4 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The mount tests do a real FUSE mount. Installing fuse3 keeps them
+      # running here rather than skipping: a mount that only ever works on a
+      # developer's machine is not a tested mount.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3
       - uses: wow-look-at-my/go-toolchain@v1
