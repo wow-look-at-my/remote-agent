@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sync"
 )
 
 // protocolVersion is the MCP revision this server implements. A client that
@@ -45,9 +44,7 @@ type Server struct {
 	backend Backend
 	version string
 	tools   []tool
-
-	mu  sync.Mutex // serializes writes; requests are handled concurrently
-	out *json.Encoder
+	out     *json.Encoder
 }
 
 // New returns a server exposing the remote toolset backed by b. version is
@@ -59,15 +56,17 @@ func New(b Backend, version string) *Server {
 }
 
 // Serve reads JSON-RPC messages from in until EOF, writing replies to out.
-// Requests are handled concurrently so a slow read on the remote host does not
-// stall the tool calls issued alongside it; replies are id-matched, so their
-// order on the wire does not matter.
+//
+// Requests are handled strictly in arrival order. Handling them concurrently
+// would shave latency off batched reads, but it also reorders writes: a client
+// that sends write_file and then edit_file for the same path without waiting
+// would see the edit run against the pre-write contents. Claude Code never
+// pipelines MCP calls (MCP tools inherit isConcurrencySafe=false, so its tool
+// executor runs them one at a time), so serializing costs nothing there and
+// keeps every other client's dependent operations ordered.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	s.out = json.NewEncoder(out)
 	dec := json.NewDecoder(in)
-
-	var wg sync.WaitGroup
-	defer wg.Wait()
 
 	for {
 		var req request
@@ -80,14 +79,10 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			return fmt.Errorf("decode request: %w", err)
 		}
 		if req.ID == nil {
-			// Notification: no reply, and nothing to wait for.
+			// Notification: no reply expected.
 			continue
 		}
-		wg.Add(1)
-		go func(req request) {
-			defer wg.Done()
-			s.reply(s.handle(&req))
-		}(req)
+		s.reply(s.handle(&req))
 	}
 }
 
@@ -167,13 +162,11 @@ func (s *Server) lookup(name string) *tool {
 	return nil
 }
 
-// reply writes one response, serializing concurrent handlers.
+// reply writes one response.
 func (s *Server) reply(resp *response) {
 	if resp == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.out.Encode(resp); err != nil {
 		// stdout is gone (client exited); nothing left to report it to.
 		return

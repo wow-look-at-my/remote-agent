@@ -38,13 +38,28 @@ type LaunchOptions struct {
 // filesystem directly. They have no shell-prefix hook -- they call Node's fs
 // against the machine Claude runs on -- so the only way to keep a remote
 // session honest is to take them out of the tool set and hand the model the
-// remote MCP equivalents instead. Names that a given Claude version does not
-// define are simply ignored by --disallowedTools.
-var disabledLocalTools = []string{"Read", "Write", "Edit", "MultiEdit", "NotebookRead", "NotebookEdit", "Glob", "Grep"}
+// remote MCP equivalents instead.
+//
+// Only names that actually exist are listed: claude warns at startup for each
+// deny rule that "matches no known tool", so speculative entries (MultiEdit,
+// NotebookRead) are startup noise rather than insurance.
+var disabledLocalTools = []string{"Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep"}
 
 // mcpServerName is the MCP server name Claude prefixes onto every remote tool
 // (mcp__remote__read_file, ...).
 const mcpServerName = "remote"
+
+// preAllowedRemoteTools are the read-only remote tools allowed up front, so
+// the swap keeps the permission behaviour of the built-ins it replaces:
+// Read/Glob/Grep never prompted, while Write/Edit did. The mutating tools
+// (write_file, edit_file, upload_file, download_file) are deliberately absent
+// and still go through the normal permission prompt.
+var preAllowedRemoteTools = []string{
+	"mcp__" + mcpServerName + "__read_file",
+	"mcp__" + mcpServerName + "__list_dir",
+	"mcp__" + mcpServerName + "__glob",
+	"mcp__" + mcpServerName + "__grep",
+}
 
 // Test seams so the orchestration can be exercised without a real daemon/claude.
 var (
@@ -220,6 +235,7 @@ func remoteToolArgs(configPath string) []string {
 	return []string{
 		"--mcp-config=" + configPath,
 		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
+		"--allowedTools=" + strings.Join(preAllowedRemoteTools, ","),
 	}
 }
 

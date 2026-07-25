@@ -204,8 +204,19 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	assert.Equal(t, []string{
 		"--mcp-config=" + configPath,
 		"--disallowedTools=" + strings.Join(disabledLocalTools, ","),
+		"--allowedTools=" + strings.Join(preAllowedRemoteTools, ","),
 		"--model", "opus",
 	}, gotArgs)
+	// Every flag uses the "=" form: claude declares these options variadic, so
+	// a space-separated value would swallow the user's own arguments.
+	for _, arg := range gotArgs[:3] {
+		assert.Contains(t, arg, "=", "remote toolset flags must bind their value with '='")
+	}
+	// Only read-only tools are pre-allowed; mutations still prompt.
+	allowed := gotArgs[2]
+	assert.Contains(t, allowed, "mcp__remote__read_file")
+	assert.NotContains(t, allowed, "write_file")
+	assert.NotContains(t, allowed, "edit_file")
 	assert.NotEmpty(t, gotBin)
 
 	// The MCP config points claude at this binary's `mcp` subcommand, pinned

@@ -5,10 +5,11 @@ Guidance for Claude Code (and other agents) working in this repository.
 ## What this is
 
 `remote-agent` is a single Go binary that exposes a small, structured toolset
-(`exec`, `read`, `write`, `edit`, `ls`, `ps`, `sysinfo`, `upload`, `download`,
-`readlink`) against a **remote host over SSH**. It is built around a long-lived
-local **daemon** that holds one SSH connection, plus a copy of the same binary
-**deployed to the remote** to service operations that need structured output there.
+(`exec`, `read`, `write`, `edit`, `ls`, `glob`, `grep`, `ps`, `sysinfo`,
+`upload`, `download`, `readlink`) against a **remote host over SSH**. It is built
+around a long-lived local **daemon** that holds one SSH connection, plus a copy of
+the same binary **deployed to the remote** to service operations that need
+structured output there.
 
 It also ships a `claude` launcher (`remote-agent claude [user@host]`) that runs
 Claude Code with `CLAUDE_CODE_SHELL_PREFIX` pointed at a one-line shim
@@ -19,6 +20,10 @@ through the daemon, while hook commands and MCP stdio servers run **locally**
 (see Gotchas). The shim must be a **single-token** program path — Claude's
 prefix wrapper shell-quotes the program name, so a multi-word prefix like
 `remote-agent claude-shim` would be treated as one executable name and fail.
+
+The launcher also swaps Claude's **file tools** onto the remote host: it
+registers `remote-agent mcp` (`mcpserver/`) as an MCP stdio server and disables
+the built-in local-filesystem tools (see Gotchas). `--local-tools` opts out.
 
 ## Build, test, lint
 
@@ -94,9 +99,10 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 | Path | Responsibility |
 |------|----------------|
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
-| `client/` | Unix-socket client and the human-readable printer for each action. `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
-| `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`). |
-| `agent/` | Remote-side system/process/file collectors; platform files selected by build tag. |
+| `client/` | Unix-socket client (`client.go`; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
+| `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
+| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing the remote filesystem as tools. `server.go` is the protocol layer, `tools.go` the tool declarations and their daemon calls. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
+| `agent/` | Remote-side system/process/file collectors and the search implementations (`glob.go`, `grep.go`); platform files selected by build tag. |
 | `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
 
@@ -159,6 +165,46 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   verbatim. Paths in both clauses may be bare OR single-quoted (Claude quotes
   only outside `[A-Za-z0-9_./:=@+,-]`); non-matching clauses are left
   untouched.
+- **Claude's file tools cannot be redirected — they are replaced.** Read,
+  Write, Edit, Glob and Grep call Node's `fs` against the machine claude runs
+  on (cli.js: the Read tool reads through the process-local fs accessor); there
+  is no file-tool equivalent of CLAUDE_CODE_SHELL_PREFIX, no env var, and no
+  hook that can rewrite where they land. `remote-agent claude` therefore passes
+  `--disallowedTools=Read,Write,Edit,NotebookEdit,Glob,Grep` (claude filters
+  denied tools out of the advertised tool set, so the model never sees them)
+  and registers `remote-agent mcp` via `--mcp-config`, whose tools carry the
+  `mcp__remote__` prefix. Only tools that exist are listed: an unknown name
+  produces a "matches no known tool" warning at startup.
+- **The launcher's claude flags must use the `--flag=value` form.**
+  `--mcp-config`, `--disallowedTools` and `--allowedTools` are declared
+  variadic (`<configs...>`, `<tools...>`), so in the space-separated form
+  commander keeps consuming following arguments — it would swallow the user's
+  own prompt and flags. The `=` form binds exactly one value and stops
+  (commander's `/^--[^=]+=/` branch does not set the variadic accumulator).
+  Repeated occurrences concatenate, so the user's own copies of these flags
+  still apply.
+- **Read-only remote tools are pre-allowed, mutating ones are not**
+  (`preAllowedRemoteTools` in `client/launch.go`). MCP tools always prompt on
+  first use, while the built-in Read/Glob/Grep never did; pre-allowing the
+  read-only four restores the permission behaviour of the tools being replaced,
+  and leaving write_file/edit_file/upload_file/download_file out keeps writes
+  gated exactly as Write/Edit were.
+- **The MCP server answers requests strictly in arrival order**
+  (`mcpserver/server.go`). Concurrency would speed up batched reads but
+  reorders dependent writes — a client sending write_file then edit_file for
+  one path without waiting would edit the pre-write contents (observed before
+  it was serialized). Claude Code never pipelines MCP calls anyway: MCP tools
+  inherit `isConcurrencySafe = false`, so its executor runs them one at a time.
+- **glob/grep run on the remote, not through `find`/`grep`** (`agent/glob.go`,
+  `agent/grep.go`, invoked as `serve glob` / `serve grep`). Matching, ordering
+  and limiting happen remote-side: one round trip per query, no dependency on
+  the remote's find/grep dialect (BusyBox included), and consistent semantics
+  (`**`, brace alternatives, RE2 regexes, binary-file and `.git`/`node_modules`
+  skipping).
+- **`edit` requires a unique match** unless `--replace-all` / `replace_all`.
+  Silently replacing the first of several occurrences is unusable for a model
+  that cannot see which one changed; the error names the occurrence count so
+  the caller knows to add context.
 - `cd` does not persist between Bash tool calls through the launcher: each
   forwarded command runs as a one-shot exec on the remote (fresh login shell
   in the remote home). Documented limitation — combine steps in a single
@@ -167,6 +213,13 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   an unknown host is trusted on first use and its key recorded in
   `~/.ssh/known_hosts`; a recorded host must present the same key or the
   connection fails. The fingerprint is printed on connect for verification.
+- **The SSH keepalive must not want a reply.** `sshutil.keepAlive` pings with
+  `wantReply=false` and watches `client.Wait()`. With x/crypto v0.52 a
+  reply-wanting global request spins forever after a disconnect: SendRequest
+  drains buffered responses with `select { case <-m.globalResponses: default: }`
+  and that channel is *closed* on teardown, so the receive is always ready
+  (ssh/mux.go:158). That hung `TestKeepAliveDisconnect` for its full timeout —
+  invisible for a while because cached test results masked it.
 - `client.Exec` returns `(exitCode, err)`: `err` is a transport/daemon failure,
   while a non-zero remote exit is reported via `exitCode`. `cmd/exec.go` mirrors
   that code as the process exit code (via the `osExit` test seam), so callers like
@@ -186,3 +239,6 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 3. A `handle<Name>` handler in `daemon/ops.go`, wired into the switch in
    `daemon/handler.go`.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
+5. If the model should be able to use it through `remote-agent claude`, add a
+   tool for it in `mcpserver/tools.go` (declaration + handler calling
+   `s.backend.Call`).

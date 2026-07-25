@@ -50,6 +50,8 @@ remote-agent ls /var/log --recursive
 remote-agent read /etc/hostname
 echo "hi" | remote-agent write /tmp/greeting --mode 0644
 remote-agent edit /tmp/greeting --old hi --new hello
+remote-agent glob '**/*.go' /srv/app
+remote-agent grep 'func main' /srv/app --include '**/*.go'
 remote-agent ps --filter nginx
 remote-agent sysinfo
 remote-agent upload ./local.txt /tmp/remote.txt
@@ -69,10 +71,11 @@ shell command (e.g. `remote-agent exec false` exits 1).
 ### Run Claude Code against a remote host
 
 `remote-agent claude` launches [Claude Code](https://claude.com/claude-code) with
-its shell wired to run **every Bash command on the remote host** instead of
-locally. It starts (or reuses) a daemon for the target and points Claude's
-`CLAUDE_CODE_SHELL_PREFIX` at a shim that forwards each command through the daemon.
-The model just runs ordinary shell commands — it never has to think about SSH.
+**both its shell and its file tools pointed at the remote host** instead of the
+local machine. It starts (or reuses) a daemon for the target, points Claude's
+`CLAUDE_CODE_SHELL_PREFIX` at a shim that forwards each Bash command through the
+daemon, and registers an MCP server that serves the remote filesystem. The model
+just reads, edits and runs things — it never has to think about SSH.
 
 ```sh
 remote-agent claude user@host                 # start daemon, launch claude wired to it
@@ -84,6 +87,13 @@ remote-agent claude                           # reuse the single running daemon
 A daemon started by this command is stopped again when claude exits; pass
 `--keep-daemon` to leave it running, or `--claude-bin` to point at a specific
 `claude` executable.
+
+Claude's built-in Read/Write/Edit/Glob/Grep tools call the local filesystem
+directly and cannot be redirected, so they are switched off and replaced by
+remote equivalents (`read_file`, `write_file`, `edit_file`, `list_dir`, `glob`,
+`grep`, `upload_file`, `download_file`) served over MCP. The read-only ones are
+pre-allowed, matching the built-ins they replace; writes still ask. Pass
+`--local-tools` to keep the built-ins and move only Bash.
 
 > Note: each Bash call runs as a one-shot command on the remote, so shell state
 > (e.g. `cd`, exported variables) does not persist between calls — use absolute
@@ -102,14 +112,17 @@ for them actually exist.
 | Command | Description |
 |---------|-------------|
 | `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
-| `claude [user@host]` | Launch Claude Code with its Bash shell wired to run on the remote. `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
+| `claude [user@host]` | Launch Claude Code with its shell and file tools wired to the remote. `--port`, `--keep-daemon`, `--claude-bin`, `--local-tools`; args after `--` pass through to claude. |
 | `disconnect` | Stop the daemon. The helper binary stays cached in `~/.cache/remote-agent` on the remote, so the next connect skips the upload. |
 | `ping` | Check that the daemon and remote are alive. |
 | `exec <command...>` | Run a shell command on the remote. |
 | `ls [path]` | List a remote directory. `--recursive` walks subdirectories. |
 | `read <path>` | Print a remote file (binary-safe). |
 | `write <path>` | Write stdin to a remote file (binary-safe, any size). `--mode` sets permissions (octal, default 0644). |
-| `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`. |
+| `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`; the text must be unique unless `--replace-all`. |
+| `glob <pattern> [path]` | List remote files matching a glob (`**`, braces), newest first. `--limit` caps results. |
+| `grep <pattern> [path]` | Search remote file contents by regex. `--include`, `--mode`, `-i`, `-C`, `--limit`. |
+| `mcp` | Serve the remote filesystem to an MCP client over stdio (used by `claude`, usable by any MCP client). |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
 | `upload <local> <remote>` | Copy a local file to the remote. |
@@ -134,7 +147,9 @@ for them actually exist.
   only across the local JSON socket hop.
 - A copy of the binary is **deployed to the remote** and invoked as a hidden
   `serve` subcommand for operations that need structured output there (`sysinfo`,
-  `ps`, `edit`), with start/stop/action **audit logging** to the remote's syslog.
+  `ps`, `edit`, `glob`, `grep`), with start/stop/action **audit logging** to the
+  remote's syslog. Searching remote-side means one round trip per query and no
+  dependency on the remote's `find`/`grep` dialect.
   The helper is content-addressed and cached in `~/.cache/remote-agent`, so
   reconnects skip the multi-megabyte upload when the binary is unchanged.
 
