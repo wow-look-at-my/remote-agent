@@ -122,6 +122,7 @@ func IsBashToolWrapper(command string) bool {
 // written only when the command succeeded).
 func forwardBashToolWrapper(command string) (int, error) {
 	laundered, cwdFile := launderBashToolWrapper(command)
+	laundered = prefixWorkingDirectory(laundered)
 	code, err := Exec(laundered)
 	if err != nil {
 		return 0, err
@@ -130,6 +131,36 @@ func forwardBashToolWrapper(command string) (int, error) {
 		writeCwdFile(cwdFile)
 	}
 	return code, nil
+}
+
+// prefixWorkingDirectory makes a forwarded command run in the directory claude
+// is working in, instead of the remote home.
+//
+// It applies only when the session mounted the remote at the identical local
+// path (REMOTE_AGENT_MOUNT), because only then is the local working directory
+// also a valid remote directory. Without it, `cat main.go` after `cd` into a
+// project would look for the file in the remote home -- the mismatch that made
+// the launcher feel like two machines instead of one.
+func prefixWorkingDirectory(command string) string {
+	mount := os.Getenv("REMOTE_AGENT_MOUNT")
+	if mount == "" {
+		return command
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return command
+	}
+	if wd != mount && !strings.HasPrefix(wd, mount+"/") {
+		return command
+	}
+	// A failed cd must abort the command rather than silently run it in the
+	// wrong directory, so this is && and not ;.
+	return "cd " + shellQuote(wd) + " && " + command
+}
+
+// shellQuote wraps a path in single quotes for a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 // launderBashToolWrapper strips the two local-machine clauses from a Bash tool

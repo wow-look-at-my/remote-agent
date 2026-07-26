@@ -39,14 +39,46 @@ func ServePs(filter string) error {
 }
 
 // ServeEdit performs a find/replace edit on a file.
-func ServeEdit(path, oldText, newText string) error {
+func ServeEdit(path, oldText, newText string, replaceAll bool) error {
 	logger := NewLogger()
 	defer logger.Close()
 
 	logger.LogAction("edit", fmt.Sprintf("path=%s", path))
-	result, err := EditFile(path, oldText, newText)
+	result, err := EditFile(path, oldText, newText, replaceAll)
 	if err != nil {
 		logger.LogError("edit", err)
+		writeJSONError(err)
+		return nil
+	}
+	writeJSON(result)
+	return nil
+}
+
+// ServeGlob resolves a glob pattern against the remote filesystem.
+func ServeGlob(opts GlobOptions) error {
+	logger := NewLogger()
+	defer logger.Close()
+
+	logger.LogAction("glob", fmt.Sprintf("pattern=%s path=%s", opts.Pattern, opts.Path))
+	result, err := GlobFiles(opts)
+	if err != nil {
+		logger.LogError("glob", err)
+		writeJSONError(err)
+		return nil
+	}
+	writeJSON(result)
+	return nil
+}
+
+// ServeGrep searches the remote filesystem for a regular expression.
+func ServeGrep(opts GrepOptions) error {
+	logger := NewLogger()
+	defer logger.Close()
+
+	logger.LogAction("grep", fmt.Sprintf("pattern=%s path=%s", opts.Pattern, opts.Path))
+	result, err := GrepFiles(opts)
+	if err != nil {
+		logger.LogError("grep", err)
 		writeJSONError(err)
 		return nil
 	}

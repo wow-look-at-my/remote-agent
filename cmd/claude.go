@@ -10,13 +10,24 @@ import (
 var claudeCmd = &cobra.Command{
 	Use:   "claude [user@host] [-- claude-args...]",
 	Short: "Launch Claude Code with its shell wired to run on the remote host",
-	Long: `Launch Claude Code so that every Bash tool command it runs executes on a
-remote host through the remote-agent daemon, instead of locally.
+	Long: `Launch Claude Code so that every Bash tool command and every file operation
+it performs executes on a remote host through the remote-agent daemon, instead
+of locally.
 
 It starts (or reuses) a daemon for the target, then runs claude with
 CLAUDE_CODE_SHELL_PREFIX pointed at a shim that forwards each command to the
 remote. The model never has to think about SSH -- it just runs ordinary shell
 commands and they land on the remote machine.
+
+The remote working directory is mounted locally at the same absolute path, so
+Claude's own tools -- Read, Write, Edit, Glob, Grep -- and any other program
+that opens a file, including third-party MCP servers and tools that did not
+exist when this was written, operate on the remote host without knowing it.
+Claude runs with that directory as its working directory.
+
+Pass --dir to choose the remote directory, --mount-at to put the mount
+somewhere else locally, or --no-mount where FUSE is unavailable (then only
+remote-agent's own MCP tools reach the remote).
 
 The optional positional argument is the SSH target (user@host). If omitted, a
 single already-running daemon is reused. Anything after "--" is passed straight
@@ -32,6 +43,10 @@ Examples:
 		port, _ := cmd.Flags().GetInt("port")
 		keep, _ := cmd.Flags().GetBool("keep-daemon")
 		claudeBin, _ := cmd.Flags().GetString("claude-bin")
+		localTools, _ := cmd.Flags().GetBool("local-tools")
+		remoteDir, _ := cmd.Flags().GetString("dir")
+		mountAt, _ := cmd.Flags().GetString("mount-at")
+		noMount, _ := cmd.Flags().GetBool("no-mount")
 
 		// Positional args before "--" are the optional target; args after "--"
 		// are passed through to claude.
@@ -59,6 +74,10 @@ Examples:
 			ClaudeBin:  claudeBin,
 			ClaudeArgs: claudeArgs,
 			KeepDaemon: keep,
+			LocalTools: localTools,
+			RemoteDir:  remoteDir,
+			MountAt:    mountAt,
+			NoMount:    noMount,
 		})
 	},
 }
@@ -68,4 +87,8 @@ func init() {
 	claudeCmd.Flags().Int("port", 22, "SSH port used when starting a fresh daemon")
 	claudeCmd.Flags().Bool("keep-daemon", false, "keep the daemon running after claude exits (only if this command started it)")
 	claudeCmd.Flags().String("claude-bin", "claude", "path or name of the claude executable")
+	claudeCmd.Flags().String("dir", "", "remote directory to work in (default: the remote home directory)")
+	claudeCmd.Flags().String("mount-at", "", "local mount point (default: the same path as --dir)")
+	claudeCmd.Flags().Bool("no-mount", false, "do not mount; expose the remote filesystem as MCP tools instead (no FUSE required)")
+	claudeCmd.Flags().Bool("local-tools", false, "with --no-mount, keep Claude's built-in file tools so only Bash runs remotely")
 }

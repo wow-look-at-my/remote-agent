@@ -260,6 +260,7 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 	path, _ := params["path"].(string)
 	oldText, _ := params["old"].(string)
 	newText, _ := params["new"].(string)
+	replaceAll, _ := params["replace_all"].(bool)
 	if path == "" || oldText == "" {
 		return errResponse(fmt.Errorf("missing 'path' or 'old' parameter"))
 	}
@@ -267,6 +268,9 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
 		h.daemon.remotePath, shellEscape(path), shellEscape(oldText), shellEscape(newText))
+	if replaceAll {
+		cmd += " --replace-all"
+	}
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("edit failed: %w", err))
