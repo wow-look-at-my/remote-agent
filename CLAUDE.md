@@ -61,9 +61,10 @@ create branch-scoped releases only; a **master** publish is what advances the
 bare "latest" download URL and the Homebrew formula
 (`brew install pazer/build/remote-agent`). buildhost also syncs the project's
 public/private visibility to the repo's visibility on OIDC publishes. The
-workflow's `permissions` block must carry `deployments: write` alongside
-`id-token: write` -- autorelease registers every publish as a GitHub Deployment
-and fails the build if it cannot. Do not
+workflow's `permissions` block must carry `deployments: write` and
+`artifact-metadata: write` alongside `id-token: write` -- autorelease registers
+every publish as a GitHub Deployment and posts an artifact storage record, with
+no opt-out for either, and fails the build without both. Do not
 add a `publish` job to build.yml — it would duplicate autorelease.
 
 A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
