@@ -6,6 +6,11 @@ on:
 permissions:
   id-token: write
   contents: write
+  # go-toolchain's autorelease registers each buildhost publish as a GitHub
+  # Deployment and posts an artifact storage record. Neither has an opt-out and
+  # both fail the build when ungranted.
+  deployments: write
+  artifact-metadata: write
   actions: read
   checks: read
 

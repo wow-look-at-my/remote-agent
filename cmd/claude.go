@@ -30,7 +30,8 @@ somewhere else locally, or --no-mount where FUSE is unavailable (then only
 remote-agent's own MCP tools reach the remote).
 
 The optional positional argument is the SSH target (user@host). If omitted, a
-single already-running daemon is reused. Anything after "--" is passed straight
+running daemon is reused -- and if none is running, a daemon is started for the
+target of the last one that did. Anything after "--" is passed straight
 through to claude. A daemon started by this command is stopped again when claude
 exits (use --keep-daemon to leave it running).
 
@@ -61,7 +62,9 @@ Examples:
 		var target string
 		switch len(pre) {
 		case 0:
-			// reuse a running daemon
+			// No positional target: fall back to --target, then to a running
+			// daemon (or the last one that ran, which is restarted).
+			target = client.TargetOverride
 		case 1:
 			target = pre[0]
 		default:

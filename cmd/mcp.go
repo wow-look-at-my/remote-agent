@@ -18,10 +18,10 @@ var mcpCmd = &cobra.Command{
 	Long: `Serve the remote host's filesystem to an MCP client over stdio.
 
 Exposes read_file, write_file, edit_file, list_dir, glob, grep, upload_file and
-download_file, each operating on the remote host through a running remote-agent
-daemon (start one with 'remote-agent connect', or let 'remote-agent claude' do
-it). The daemon socket is selected exactly as it is for every other command,
-via REMOTE_AGENT_SOCKET or REMOTE_AGENT_TARGET.`,
+download_file, each operating on the remote host through the remote-agent
+daemon. The daemon socket is selected exactly as it is for every other command,
+via REMOTE_AGENT_SOCKET, --target or REMOTE_AGENT_TARGET, and a daemon is
+started automatically when none is running.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return mcpserver.New(client.DaemonBackend{}, mcpServerVersion).Serve(os.Stdin, os.Stdout)

@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,11 +22,29 @@ var OutputJSON bool
 // and REMOTE_AGENT_TARGET environment variables provide the same control.
 var SocketOverride string
 
-// sendRequest locates the daemon socket and sends a request to it.
+// sendRequest locates the daemon socket and sends a request to it, starting a
+// daemon first when none is running. The daemon is an implementation detail:
+// `connect` makes the first command faster, it is not a prerequisite.
 func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	sockPath, err := findSocket()
-	if err != nil {
+	if err == nil {
+		resp, sendErr := sendRequestTo(sockPath, req)
+		if sendErr == nil || !errors.Is(sendErr, errNoDaemon) {
+			return resp, sendErr
+		}
+		err = sendErr // socket present but dead: fall through and restart it
+	}
+	if !autoStartEnabled(req.Action) {
 		return nil, err
+	}
+
+	rec, targetErr := resolveTarget()
+	if targetErr != nil {
+		return nil, fmt.Errorf("%w (%s)", err, targetErr)
+	}
+	sockPath, startErr := autoStartDaemon(rec)
+	if startErr != nil {
+		return nil, startErr
 	}
 	return sendRequestTo(sockPath, req)
 }
@@ -34,7 +53,7 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 func sendRequestTo(sockPath string, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		return nil, fmt.Errorf("connect to daemon: %w (is the daemon running? use 'remote-agent connect' first)", err)
+		return nil, fmt.Errorf("%w: connect to daemon at %s: %v", errNoDaemon, sockPath, err)
 	}
 	defer conn.Close()
 
@@ -52,15 +71,23 @@ func sendRequestTo(sockPath string, req *protocol.DaemonRequest) (*protocol.Daem
 	return &resp, nil
 }
 
-// findSocket determines which daemon socket to use. An explicit SocketOverride or
-// the REMOTE_AGENT_SOCKET / REMOTE_AGENT_TARGET environment variables take
-// precedence; otherwise it discovers a single running daemon by globbing TempDir.
+// findSocket determines which daemon socket to use. An explicit SocketOverride,
+// the REMOTE_AGENT_SOCKET environment variable, the --target flag or
+// REMOTE_AGENT_TARGET take precedence; otherwise it discovers a single running
+// daemon by globbing TempDir. A socket path is returned whether or not anything
+// is listening on it -- sendRequest starts a daemon when nothing answers.
 func findSocket() (string, error) {
 	if SocketOverride != "" {
 		return SocketOverride, nil
 	}
+	if resolvedSocket != "" {
+		return resolvedSocket, nil
+	}
 	if s := os.Getenv("REMOTE_AGENT_SOCKET"); s != "" {
 		return s, nil
+	}
+	if TargetOverride != "" {
+		return daemon.SocketPath(TargetOverride), nil
 	}
 	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
 		return daemon.SocketPath(t), nil
@@ -71,11 +98,11 @@ func findSocket() (string, error) {
 
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no daemon running (no socket found at %s)", pattern)
+		return "", fmt.Errorf("%w (no socket found at %s)", errNoDaemon, pattern)
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple daemons running (%d sockets found); set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
+		return "", fmt.Errorf("multiple daemons running (%d sockets found); pass --target user@host, or set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
 	}
 }
 
