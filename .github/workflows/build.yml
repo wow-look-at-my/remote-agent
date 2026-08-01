@@ -6,6 +6,9 @@ on:
 permissions:
   id-token: write
   contents: write
+  # go-toolchain's autorelease registers each buildhost publish as a GitHub
+  # Deployment, and cannot be asked not to.
+  deployments: write
   actions: read
   checks: read
 
