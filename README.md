@@ -44,10 +44,16 @@ local binary is itself linux/amd64, in which case it deploys itself.
 ## Usage
 
 ```sh
-# 1. Connect — starts a background daemon that holds the SSH connection
+# Just run a command — the daemon starts itself on first use
+remote-agent ls /var/log --target user@host
+
+# ...and the target is remembered, so later commands need no flag
+remote-agent read /etc/hostname
+
+# Connecting up front is optional; it just moves the SSH setup out of the
+# first command
 remote-agent connect user@host           # --port N for a non-standard SSH port
 
-# 2. Operate on the remote
 remote-agent ping
 remote-agent exec "uname -a"
 remote-agent ls /var/log --recursive
@@ -67,11 +73,12 @@ remote-agent mount /mnt/remote /srv/app
 grep -r TODO /mnt/remote        # ordinary tools, remote files
 remote-agent unmount /mnt/remote
 
-# 3. Disconnect — stops the daemon (the helper stays cached for fast reconnects)
+# Disconnect — stops the daemon (the helper stays cached for fast reconnects)
 remote-agent disconnect
 ```
 
-Add `--json` to any command for machine-readable output instead of compact text.
+Add `--json` to any command for machine-readable output instead of compact text,
+and `--target user@host` to choose which host it runs against.
 
 `exec` mirrors the remote command's **exit code** as its own, and forwards remote
 stdout to stdout and stderr to stderr — so it behaves like a transparent local
@@ -133,7 +140,7 @@ for them actually exist.
 
 | Command | Description |
 |---------|-------------|
-| `connect <user@host>` | Start the daemon and SSH session. `--port` sets the SSH port (default 22). |
+| `connect <user@host>` | Start the daemon and SSH session up front. Optional: any command starts one on demand. `--port` sets the SSH port (default 22). |
 | `claude [user@host]` | Launch Claude Code with its shell and its files on the remote. `--dir`, `--mount-at`, `--no-mount`, `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
 | `mount <mountpoint> [remote-path]` | Mount the remote filesystem locally. `--allow-other` shares it with other local users. |
 | `unmount <mountpoint>` | Detach a mount. |
@@ -192,10 +199,17 @@ recorded key. The fingerprint is printed on connect — verify it on first conta
 
 There is **one daemon per target host** (the socket path is derived from the
 target), so multiple terminals targeting the same host share a connection. When
-more than one daemon is running, set `REMOTE_AGENT_TARGET=user@host` (or
-`REMOTE_AGENT_SOCKET=/path/to.sock`) to pick which one a command talks to;
-`remote-agent claude` exports this automatically so its forwarded commands always
-reach the right daemon.
+more than one daemon is running, pass `--target user@host` (or set
+`REMOTE_AGENT_TARGET` / `REMOTE_AGENT_SOCKET`) to pick which one a command talks
+to; `remote-agent claude` exports this automatically so its forwarded commands
+always reach the right daemon.
+
+Any command starts a daemon when none is running, and restarts one that died or
+idled out — `connect` is an optimization, not a prerequisite. The target comes
+from `--target`, then `REMOTE_AGENT_TARGET`, then the last target a daemon ran
+for (remembered in a small file beside the socket). Set
+`REMOTE_AGENT_NO_AUTOSTART=1` to require an explicit `connect` instead;
+`disconnect` and `ping` never start one.
 
 ## Development
 

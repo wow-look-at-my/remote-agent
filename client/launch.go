@@ -107,11 +107,17 @@ func LaunchClaude(opts LaunchOptions) error {
 		return fmt.Errorf("cannot find claude binary %q on PATH: %w (use --claude-bin)", claudeBin, err)
 	}
 
-	env := buildEnv(os.Environ(), map[string]string{
+	overrides := map[string]string{
 		"CLAUDE_CODE_SHELL_PREFIX": shimPath,
 		"REMOTE_AGENT_BIN":         self,
 		"REMOTE_AGENT_SOCKET":      sockPath,
-	})
+	}
+	if opts.Target != "" {
+		// So a forwarded command or the MCP server can bring the daemon back
+		// up by itself if it dies or idles out mid-session.
+		overrides["REMOTE_AGENT_TARGET"] = opts.Target
+	}
+	env := buildEnv(os.Environ(), overrides)
 
 	claudeArgs := opts.ClaudeArgs
 	workDir := ""
@@ -171,12 +177,20 @@ func LaunchClaude(opts LaunchOptions) error {
 func ensureDaemon(self string, opts LaunchOptions) (sockPath string, started bool, err error) {
 	if opts.Target == "" {
 		// No target: reuse the single running daemon, if exactly one exists.
-		s, ferr := findSocket()
-		if ferr != nil {
-			return "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", ferr)
+		if s, ferr := findSocket(); ferr == nil && pingSocket(s) {
+			fmt.Fprintf(os.Stderr, "Using running daemon at %s.\n", s)
+			return s, false, nil
 		}
-		fmt.Fprintf(os.Stderr, "Using running daemon at %s.\n", s)
-		return s, false, nil
+		// Nothing listening: fall back to the target a daemon last ran for,
+		// so a session that idled out can be resumed without retyping it.
+		rec, terr := resolveTarget()
+		if terr != nil {
+			return "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", terr)
+		}
+		opts.Target = rec.Target
+		if opts.Port == 0 {
+			opts.Port = rec.Port
+		}
 	}
 
 	sockPath = daemon.SocketPath(opts.Target)
@@ -187,10 +201,11 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath string, started boo
 
 	logPath := filepath.Join(tmpDir(opts.ShimDir), "remote-agent-claude-daemon.log")
 	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", opts.Target, logPath)
-	if _, err := startDaemonFunc(self, opts.Target, opts.Port, logPath); err != nil {
+	proc, err := startDaemonFunc(self, opts.Target, opts.Port, logPath)
+	if err != nil {
 		return "", false, fmt.Errorf("start daemon: %w", err)
 	}
-	if err := waitForDaemon(sockPath, daemonReadyWait); err != nil {
+	if err := awaitDaemon(sockPath, proc, logPath, daemonReadyWait); err != nil {
 		return "", false, fmt.Errorf("daemon did not become ready: %w (see %s)", err, logPath)
 	}
 	fmt.Fprintf(os.Stderr, "Daemon ready.\n")
@@ -310,16 +325,51 @@ func callSocket(sockPath, action string, params map[string]any, out any) error {
 
 // waitForDaemon polls until the daemon at sockPath answers a ping or timeout.
 func waitForDaemon(sockPath string, timeout time.Duration) error {
+	return awaitDaemon(sockPath, nil, "", timeout)
+}
+
+// awaitDaemon waits for the daemon to answer. Given the process it was started
+// as, it gives up the moment that process exits -- a bad host or a rejected key
+// is reported in a second with the reason, instead of after the full timeout.
+func awaitDaemon(sockPath string, proc *os.Process, logPath string, timeout time.Duration) error {
+	exited := make(chan struct{})
+	if proc != nil {
+		go func() {
+			proc.Wait()
+			close(exited)
+		}()
+	}
+
 	deadline := time.Now().Add(timeout)
 	for {
 		if pingSocket(sockPath) {
 			return nil
+		}
+		select {
+		case <-exited:
+			return fmt.Errorf("daemon exited before it was ready%s", logTail(logPath))
+		default:
 		}
 		if time.Now().After(deadline) {
 			return errors.New("timeout waiting for daemon to accept connections")
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// logTail returns the last few lines of the daemon log, formatted for appending
+// to an error message. The daemon reports SSH failures there and nowhere else.
+func logTail(logPath string) string {
+	const maxLines = 6
+	data, err := os.ReadFile(logPath)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return ":\n" + strings.Join(lines, "\n")
 }
 
 // pingSocket reports whether a healthy daemon is listening at sockPath.

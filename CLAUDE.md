@@ -99,24 +99,28 @@ mount (`remotefs/`). Ordinary programs then reach remote files by path.
 
 ### Request lifecycle
 
-`connect` dials SSH, prints the host-key fingerprint, deploys the helper to a
-content-addressed path (`~/.cache/remote-agent/agent-<sha256[:8]>`) — reusing an
+`connect` -- run explicitly, or started in the background by the first command
+that finds no daemon -- dials SSH, prints the host-key fingerprint, deploys the
+helper to a content-addressed path (`~/.cache/remote-agent/agent-<sha256[:8]>`) — reusing an
 identical cached copy when present, so reconnects skip the multi-MB upload — then
-writes a startup audit entry and listens. When `$HOME` is unusable it falls back
-to a random `/tmp/.remote-agent-<rand>` path (removed again on disconnect). Each
+writes a startup audit entry and listens. It also records the target beside the
+socket so a later command can restart it unaided. When `$HOME` is unusable it
+falls back to a random `/tmp/.remote-agent-<rand>` path (removed again on disconnect). Each
 command: the client locates the socket → the daemon runs either a plain shell
 command or `<remote-binary> serve <sub>` on its own SSH channel (the audit entry
 for exec/write/upload runs concurrently on another channel) → returns a
 `protocol.DaemonResponse`. The idle watchdog never fires while operations are in
 flight. `disconnect` drains pending audits, writes a shutdown audit entry, removes
-the socket/PID files, and exits; cached helpers stay in place for the next connect.
+the socket/PID files (before closing the listener, whose close races the process
+exit) and exits; the target record and cached helpers stay in place for the next
+connect.
 
 ### Packages
 
 | Path | Responsibility |
 |------|----------------|
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
-| `client/` | Unix-socket client (`client.go`; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
+| `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
 | `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing the remote filesystem as tools. `server.go` is the protocol layer, `tools.go` the tool declarations and their daemon calls. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
@@ -143,9 +147,24 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
 
 ## Gotchas
 
-- The daemon is **stateful and long-lived**: `connect` must run before any other
-  command, and there is **one daemon per target** (the socket path is
-  `sha256(target)`, so two terminals targeting the same host share it).
+- The daemon is **stateful and long-lived**, and there is **one daemon per
+  target** (the socket path is `sha256(target)`, so two terminals targeting the
+  same host share it). `connect` is optional: any command starts a daemon when
+  none answers (`client/autostart.go`), which is why the target has to be
+  discoverable -- see the next entry.
+- **The daemon starts itself, so the target must survive it.** Socket paths are
+  a one-way hash of the target, so `daemon.Start` writes a target record next to
+  the socket (`daemon/record.go`) and, unlike the socket and PID files, that
+  record is deliberately **kept on shutdown** -- it is the only way a later
+  command can restart a daemon that idled out. Resolution order is `--target`,
+  `REMOTE_AGENT_TARGET`, then a single remembered record (several are ambiguous
+  and error). `REMOTE_AGENT_NO_AUTOSTART=1` opts out; `disconnect` and `ping`
+  never auto-start, since both exist to ask whether a daemon is there.
+- **Auto-start waits on the daemon process, not just the clock**
+  (`awaitDaemon` in `client/launch.go`). A bad host or rejected key makes
+  `connect` exit in under a second; polling only the socket would hide that
+  behind the full 30s readiness timeout, so the process is watched too and its
+  log tail is quoted in the error.
 - Tests use **mock daemons and an in-process SSH test server** — there is no real
   network or SSH in the suite. The `Runner` interface (`daemon/ops.go`) is the seam
   for mocking SSH execution, and `exitFunc` (also `ops.go`) is the seam for
@@ -275,10 +294,13 @@ the socket/PID files, and exits; cached helpers stay in place for the next conne
   that code as the process exit code (via the `osExit` test seam), so callers like
   Claude's Bash tool see real success/failure. `exec` no longer prints an
   `[exit N]` marker.
-- Socket selection: `findSocket` honors `client.SocketOverride`, then
-  `REMOTE_AGENT_SOCKET`, then `REMOTE_AGENT_TARGET` (hashed via `daemon.SocketPath`),
-  before falling back to globbing a single socket in `TempDir`. The `claude`
-  launcher exports `REMOTE_AGENT_SOCKET` so forwarded commands hit the right daemon
+- Socket selection: `findSocket` honors `client.SocketOverride`, a socket this
+  process auto-started, then `REMOTE_AGENT_SOCKET`, `--target`
+  (`client.TargetOverride`) and `REMOTE_AGENT_TARGET` (hashed via
+  `daemon.SocketPath`), before falling back to globbing a single socket in
+  `TempDir`. It returns a path whether or not anything listens there --
+  `sendRequest` starts a daemon when nothing answers. The `claude`
+  launcher exports `REMOTE_AGENT_SOCKET` (and `REMOTE_AGENT_TARGET`) so forwarded commands hit the right daemon
   even when several are running.
 
 ## Adding a command

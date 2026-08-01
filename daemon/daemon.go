@@ -177,6 +177,10 @@ func Start(target string, port int) error {
 	// Write PID file
 	os.WriteFile(d.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 
+	// Remember the target this socket belongs to, so a later command can
+	// restart the daemon itself instead of erroring out. Kept on shutdown.
+	WriteTargetRecord(target, port)
+
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
 	fmt.Fprintf(os.Stderr, "Ready.\n")
 
@@ -295,11 +299,15 @@ func (d *Daemon) shutdown() {
 }
 
 func (d *Daemon) cleanup() {
+	// Remove the files before closing the listener: closing it unblocks the
+	// accept loop, whose return exits the process, and that race left the PID
+	// file behind on every clean disconnect. The target record is kept -- it is
+	// what lets the next command start a daemon without being told the target.
+	os.Remove(d.sockPath)
+	os.Remove(d.pidPath)
 	if d.listener != nil {
 		d.listener.Close()
 	}
-	os.Remove(d.sockPath)
-	os.Remove(d.pidPath)
 	if d.conn != nil {
 		d.conn.Client.Close()
 	}
