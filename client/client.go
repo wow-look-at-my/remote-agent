@@ -46,6 +46,32 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 	if startErr != nil {
 		return nil, startErr
 	}
+	// Pin it for the rest of this process, so a long-lived client does not
+	// re-resolve a stale socket path on every later untargeted call.
+	resolvedSocket = sockPath
+	return sendRequestTo(sockPath, req)
+}
+
+// sendRequestFor sends a request to the daemon for an explicit target, starting
+// one when none answers. Socket discovery and the process-wide --target are
+// bypassed entirely: a caller that names its target (every MCP tool call does)
+// must reach that host and no other, whatever else this process has been
+// pointed at.
+func sendRequestFor(target string, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
+	if target == "" {
+		return sendRequest(req)
+	}
+	resp, err := sendRequestTo(daemon.SocketPath(target), req)
+	if err == nil || !errors.Is(err, errNoDaemon) {
+		return resp, err
+	}
+	if !autoStartEnabled(req.Action) {
+		return nil, err
+	}
+	sockPath, startErr := autoStartDaemon(recordFor(target))
+	if startErr != nil {
+		return nil, startErr
+	}
 	return sendRequestTo(sockPath, req)
 }
 
@@ -111,7 +137,13 @@ func findSocket() (string, error) {
 // counterpart to the printing helpers below: the MCP server needs the
 // structured result, not text on stdout.
 func Call(action string, params map[string]any, out any) error {
-	resp, err := sendRequest(&protocol.DaemonRequest{Action: action, Params: params})
+	return CallTarget("", action, params, out)
+}
+
+// CallTarget is Call against a named SSH target, starting a daemon for that
+// target when none is running. An empty target falls back to Call's discovery.
+func CallTarget(target, action string, params map[string]any, out any) error {
+	resp, err := sendRequestFor(target, &protocol.DaemonRequest{Action: action, Params: params})
 	if err != nil {
 		return err
 	}
@@ -138,8 +170,8 @@ func Call(action string, params map[string]any, out any) error {
 type DaemonBackend struct{}
 
 // Call implements the MCP server's Backend interface.
-func (DaemonBackend) Call(action string, params map[string]any, out any) error {
-	return Call(action, params, out)
+func (DaemonBackend) Call(target, action string, params map[string]any, out any) error {
+	return CallTarget(target, action, params, out)
 }
 
 // Connect starts the daemon with the given target and SSH port.

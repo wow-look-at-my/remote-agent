@@ -34,9 +34,13 @@ type tool struct {
 // schemas: with the built-in file tools switched off, these are the only file
 // tools the model sees, so each one says plainly that it acts on the remote
 // host.
+//
+// Every tool carries the SSH target it acts on, so a call is self-contained:
+// the daemon holding the connection is started on demand for whatever target
+// arrives, and one server can serve several hosts in a session.
 func (s *Server) buildTools() []tool {
 	return []tool{
-		{
+		s.tool(tool{
 			Name: "read_file",
 			Description: "Read a file on the REMOTE host (the same machine Bash commands run on). " +
 				"Returns the contents with line numbers, so text can be quoted back to edit_file exactly. " +
@@ -50,8 +54,8 @@ func (s *Server) buildTools() []tool {
 				"path",
 			),
 			handler: s.readFile,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name: "write_file",
 			Description: "Write a file on the REMOTE host, creating it or overwriting it entirely. " +
 				"Prefer edit_file for changing part of an existing file.",
@@ -64,8 +68,8 @@ func (s *Server) buildTools() []tool {
 				"path", "content",
 			),
 			handler: s.writeFile,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name: "edit_file",
 			Description: "Replace exact text in a file on the REMOTE host. " +
 				"old_string must appear exactly once unless replace_all is true; include surrounding lines to make it unique. " +
@@ -80,8 +84,8 @@ func (s *Server) buildTools() []tool {
 				"path", "old_string", "new_string",
 			),
 			handler: s.editFile,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name:        "list_dir",
 			Description: "List a directory on the REMOTE host.",
 			InputSchema: schema(
@@ -91,8 +95,8 @@ func (s *Server) buildTools() []tool {
 				},
 			),
 			handler: s.listDir,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name: "glob",
 			Description: "Find files on the REMOTE host by glob pattern, most recently modified first. " +
 				"Supports '**' for any number of directories and brace alternatives, e.g. '**/*.{go,mod}'. " +
@@ -106,8 +110,8 @@ func (s *Server) buildTools() []tool {
 				"pattern",
 			),
 			handler: s.glob,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name: "grep",
 			Description: "Search file contents on the REMOTE host with a regular expression (RE2 syntax). " +
 				"Binary files, .git and node_modules are skipped.",
@@ -124,8 +128,8 @@ func (s *Server) buildTools() []tool {
 				"pattern",
 			),
 			handler: s.grep,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name: "upload_file",
 			Description: "Copy a file from the LOCAL machine (where Claude Code runs) to the REMOTE host. " +
 				"The only way to move a local file across; every other tool here works remote-side only.",
@@ -137,8 +141,8 @@ func (s *Server) buildTools() []tool {
 				"local_path", "remote_path",
 			),
 			handler: s.uploadFile,
-		},
-		{
+		}),
+		s.tool(tool{
 			Name:        "download_file",
 			Description: "Copy a file from the REMOTE host to the LOCAL machine (where Claude Code runs).",
 			InputSchema: schema(
@@ -149,11 +153,42 @@ func (s *Server) buildTools() []tool {
 				"remote_path", "local_path",
 			),
 			handler: s.downloadFile,
-		},
+		}),
 	}
 }
 
+// tool adds the target argument every tool takes. It is required exactly when
+// the server has no default target, so a call can never be routed to a host
+// nobody named.
+func (s *Server) tool(t tool) tool {
+	desc := "SSH target to act on, e.g. user@host or a Host alias from ~/.ssh/config. " +
+		"The connection is opened on demand."
+	if s.defaultTarget != "" {
+		t.InputSchema = addProp(t.InputSchema, "target", prop("string", desc+" Defaults to "+s.defaultTarget+"."))
+		return t
+	}
+	t.InputSchema = addProp(t.InputSchema, "target", prop("string", desc))
+	t.InputSchema = addRequired(t.InputSchema, "target")
+	return t
+}
+
+// target resolves which host a call acts on: its own target argument, else the
+// server default.
+func (s *Server) target(args map[string]any) (string, error) {
+	if t := stringArg(args, "target"); t != "" {
+		return t, nil
+	}
+	if s.defaultTarget != "" {
+		return s.defaultTarget, nil
+	}
+	return "", fmt.Errorf("missing required argument: target (the SSH target to act on, e.g. user@host)")
+}
+
 func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	path, err := requiredString(args, "path")
 	if err != nil {
 		return nil, err
@@ -165,7 +200,7 @@ func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var info protocol.FileInfo
-	if err := s.backend.Call("read", map[string]any{"path": path}, &info); err != nil {
+	if err := s.backend.Call(target, "read", map[string]any{"path": path}, &info); err != nil {
 		return nil, err
 	}
 	data, err := fileBytes(info)
@@ -218,6 +253,10 @@ func numberLines(content string, offset, limit int) string {
 }
 
 func (s *Server) writeFile(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	path, err := requiredString(args, "path")
 	if err != nil {
 		return nil, err
@@ -232,13 +271,17 @@ func (s *Server) writeFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	if err := s.backend.Call("write", params, &result); err != nil {
+	if err := s.backend.Call(target, "write", params, &result); err != nil {
 		return nil, err
 	}
-	return text(fmt.Sprintf("Wrote %d bytes to %s on the remote host.", result.BytesWritten, path)), nil
+	return text(fmt.Sprintf("Wrote %d bytes to %s on %s.", result.BytesWritten, path, target)), nil
 }
 
 func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	path, err := requiredString(args, "path")
 	if err != nil {
 		return nil, err
@@ -253,7 +296,7 @@ func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.EditResult
-	err = s.backend.Call("edit", map[string]any{
+	err = s.backend.Call(target, "edit", map[string]any{
 		"path":        path,
 		"old":         oldString,
 		"new":         newString,
@@ -263,17 +306,21 @@ func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
 		return nil, err
 	}
 	replacements := max(result.Replacements, 1)
-	return text(fmt.Sprintf("Replaced %d occurrence(s) in %s on the remote host.", replacements, path)), nil
+	return text(fmt.Sprintf("Replaced %d occurrence(s) in %s on %s.", replacements, path, target)), nil
 }
 
 func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{"recursive": boolArg(args, "recursive")}
 	if path := stringArg(args, "path"); path != "" {
 		params["path"] = path
 	}
 
 	var listing protocol.DirListing
-	if err := s.backend.Call("ls", params, &listing); err != nil {
+	if err := s.backend.Call(target, "ls", params, &listing); err != nil {
 		return nil, err
 	}
 	if len(listing.Entries) == 0 {
@@ -295,6 +342,10 @@ func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
 }
 
 func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	pattern, err := requiredString(args, "pattern")
 	if err != nil {
 		return nil, err
@@ -305,7 +356,7 @@ func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.GlobResult
-	if err := s.backend.Call("glob", params, &result); err != nil {
+	if err := s.backend.Call(target, "glob", params, &result); err != nil {
 		return nil, err
 	}
 	if len(result.Files) == 0 {
@@ -319,6 +370,10 @@ func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
 }
 
 func (s *Server) grep(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	pattern, err := requiredString(args, "pattern")
 	if err != nil {
 		return nil, err
@@ -336,7 +391,7 @@ func (s *Server) grep(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.GrepResult
-	if err := s.backend.Call("grep", params, &result); err != nil {
+	if err := s.backend.Call(target, "grep", params, &result); err != nil {
 		return nil, err
 	}
 	return text(formatGrep(&result)), nil
@@ -374,6 +429,10 @@ func formatGrep(result *protocol.GrepResult) string {
 }
 
 func (s *Server) uploadFile(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	localPath, err := requiredString(args, "local_path")
 	if err != nil {
 		return nil, err
@@ -384,14 +443,18 @@ func (s *Server) uploadFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	err = s.backend.Call("upload", map[string]any{"local_path": localPath, "remote_path": remotePath}, &result)
+	err = s.backend.Call(target, "upload", map[string]any{"local_path": localPath, "remote_path": remotePath}, &result)
 	if err != nil {
 		return nil, err
 	}
-	return text(fmt.Sprintf("Uploaded %d bytes to %s on the remote host.", result.BytesWritten, remotePath)), nil
+	return text(fmt.Sprintf("Uploaded %d bytes to %s on %s.", result.BytesWritten, remotePath, target)), nil
 }
 
 func (s *Server) downloadFile(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
 	remotePath, err := requiredString(args, "remote_path")
 	if err != nil {
 		return nil, err
@@ -402,7 +465,7 @@ func (s *Server) downloadFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	err = s.backend.Call("download", map[string]any{"remote_path": remotePath, "local_path": localPath}, &result)
+	err = s.backend.Call(target, "download", map[string]any{"remote_path": remotePath, "local_path": localPath}, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -484,6 +547,24 @@ func schema(p props, required ...string) map[string]any {
 	if len(required) > 0 {
 		s["required"] = required
 	}
+	return s
+}
+
+// addProp adds one property to a schema built by schema().
+func addProp(s map[string]any, name string, p map[string]any) map[string]any {
+	properties, ok := s["properties"].(map[string]any)
+	if !ok {
+		properties = map[string]any{}
+		s["properties"] = properties
+	}
+	properties[name] = p
+	return s
+}
+
+// addRequired marks an existing property required.
+func addRequired(s map[string]any, name string) map[string]any {
+	required, _ := s["required"].([]string)
+	s["required"] = append(required, name)
 	return s
 }
 

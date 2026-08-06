@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // TargetRecord remembers which SSH target a daemon socket belongs to. Socket
@@ -47,6 +48,14 @@ func ReadTargetRecord(path string) (TargetRecord, error) {
 		return TargetRecord{}, fmt.Errorf("target record %s has no target", path)
 	}
 	return rec, nil
+}
+
+// TargetForSocket returns the record for the daemon listening on sockPath.
+// Socket and record are named from the same hash of the target, so a client
+// that found a daemon by discovery can still name the host it is talking to --
+// which is what lets it pass that target on to a tool call.
+func TargetForSocket(sockPath string) (TargetRecord, error) {
+	return ReadTargetRecord(strings.TrimSuffix(sockPath, ".sock") + ".target")
 }
 
 // ListTargetRecords returns every known target, in unspecified order. Damaged

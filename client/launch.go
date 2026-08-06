@@ -88,10 +88,11 @@ func LaunchClaude(opts LaunchOptions) error {
 		return fmt.Errorf("locate remote-agent binary: %w", err)
 	}
 
-	sockPath, startedDaemon, err := ensureDaemon(self, opts)
+	sockPath, target, startedDaemon, err := ensureDaemon(self, opts)
 	if err != nil {
 		return err
 	}
+	opts.Target = target
 
 	shimPath, err := writeShim(tmpDir(opts.ShimDir))
 	if err != nil {
@@ -128,7 +129,7 @@ func LaunchClaude(opts LaunchOptions) error {
 		if opts.LocalTools {
 			fmt.Fprintf(os.Stderr, "Launching claude; Bash commands will run on the remote host (file tools stay local).\n")
 		} else {
-			configPath, err := writeMCPConfig(tmpDir(opts.ShimDir), self, sockPath)
+			configPath, err := writeMCPConfig(tmpDir(opts.ShimDir), self, sockPath, opts.Target)
 			if err != nil {
 				return fmt.Errorf("write MCP config: %w", err)
 			}
@@ -172,20 +173,25 @@ func LaunchClaude(opts LaunchOptions) error {
 }
 
 // ensureDaemon resolves the daemon socket for the launch, starting a new daemon
-// if a target is given and none is already running. It reports whether this call
-// started the daemon (so the caller knows whether to tear it down).
-func ensureDaemon(self string, opts LaunchOptions) (sockPath string, started bool, err error) {
+// if a target is given and none is already running. It returns the target that
+// socket serves -- recovered from the daemon's own record when the launch did
+// not name one -- and whether this call started the daemon (so the caller knows
+// whether to tear it down).
+func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, started bool, err error) {
 	if opts.Target == "" {
 		// No target: reuse the single running daemon, if exactly one exists.
 		if s, ferr := findSocket(); ferr == nil && pingSocket(s) {
 			fmt.Fprintf(os.Stderr, "Using running daemon at %s.\n", s)
-			return s, false, nil
+			// The record beside the socket names the host, so the rest of the
+			// session can pass it explicitly instead of relying on discovery.
+			rec, _ := daemon.TargetForSocket(s)
+			return s, rec.Target, false, nil
 		}
 		// Nothing listening: fall back to the target a daemon last ran for,
 		// so a session that idled out can be resumed without retyping it.
 		rec, terr := resolveTarget()
 		if terr != nil {
-			return "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", terr)
+			return "", "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", terr)
 		}
 		opts.Target = rec.Target
 		if opts.Port == 0 {
@@ -196,20 +202,20 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath string, started boo
 	sockPath = daemon.SocketPath(opts.Target)
 	if pingSocket(sockPath) {
 		fmt.Fprintf(os.Stderr, "Reusing existing daemon for %s.\n", opts.Target)
-		return sockPath, false, nil
+		return sockPath, opts.Target, false, nil
 	}
 
 	logPath := filepath.Join(tmpDir(opts.ShimDir), "remote-agent-claude-daemon.log")
 	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", opts.Target, logPath)
 	proc, err := startDaemonFunc(self, opts.Target, opts.Port, logPath)
 	if err != nil {
-		return "", false, fmt.Errorf("start daemon: %w", err)
+		return "", "", false, fmt.Errorf("start daemon: %w", err)
 	}
 	if err := awaitDaemon(sockPath, proc, logPath, daemonReadyWait); err != nil {
-		return "", false, fmt.Errorf("daemon did not become ready: %w (see %s)", err, logPath)
+		return "", "", false, fmt.Errorf("daemon did not become ready: %w (see %s)", err, logPath)
 	}
 	fmt.Fprintf(os.Stderr, "Daemon ready.\n")
-	return sockPath, true, nil
+	return sockPath, opts.Target, true, nil
 }
 
 // startDaemonProcess launches `remote-agent connect` as a detached background
@@ -416,19 +422,29 @@ func remoteToolArgs(configPath string) []string {
 // binary's `mcp` subcommand, and returns its path. The server runs on the
 // local machine (claude spawns it through the shell-prefix shim, which routes
 // MCP servers locally) and reaches the remote host through the daemon socket.
-func writeMCPConfig(dir, self, sockPath string) (string, error) {
+//
+// The target is baked into the argv, not just the socket: a socket is only a
+// path, so once this launch's daemon idles out or dies the server needs the
+// target to bring one back rather than failing every tool call.
+func writeMCPConfig(dir, self, sockPath, target string) (string, error) {
+	args := []string{"mcp"}
+	env := map[string]string{
+		"REMOTE_AGENT_BIN": self,
+		// Pinned explicitly so the tools reach this launch's daemon even if the
+		// environment is scrubbed or several daemons run.
+		"REMOTE_AGENT_SOCKET": sockPath,
+	}
+	if target != "" {
+		args = append(args, target)
+		env["REMOTE_AGENT_TARGET"] = target
+	}
 	config := map[string]any{
 		"mcpServers": map[string]any{
 			mcpServerName: map[string]any{
 				"type":    "stdio",
 				"command": self,
-				"args":    []string{"mcp"},
-				// Pinned explicitly so the tools reach this launch's daemon
-				// even if the environment is scrubbed or several daemons run.
-				"env": map[string]string{
-					"REMOTE_AGENT_BIN":    self,
-					"REMOTE_AGENT_SOCKET": sockPath,
-				},
+				"args":    args,
+				"env":     env,
 			},
 		},
 	}

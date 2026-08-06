@@ -395,8 +395,11 @@ func TestLaunchClaudeNoMountFallsBackToRemoteTools(t *testing.T) {
 	server, ok := config.MCPServers[mcpServerName]
 	require.True(t, ok, "config should define the %q server", mcpServerName)
 	assert.Equal(t, "stdio", server.Type)
-	assert.Equal(t, []string{"mcp"}, server.Args)
+	// The target rides in the argv, so the server can bring a daemon back up
+	// after this one idles out instead of failing every tool call.
+	assert.Equal(t, []string{"mcp", "root@nomount-host"}, server.Args)
 	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
+	assert.Equal(t, "root@nomount-host", server.Env["REMOTE_AGENT_TARGET"])
 }
 
 // TestLaunchClaudeNoMountLocalTools leaves claude's tools entirely alone.

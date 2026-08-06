@@ -258,3 +258,96 @@ func TestAwaitDaemonReportsProcessExit(t *testing.T) {
 func TestLogTailMissingFile(t *testing.T) {
 	assert.Empty(t, logTail(filepath.Join(t.TempDir(), "absent.log")))
 }
+
+func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
+	isolate(t)
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	resp, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	assert.True(t, resp.OK)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "root@named", calls[0].Target)
+}
+
+func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
+	isolate(t)
+	// A live daemon this process is otherwise pinned to. A call that names its
+	// own target must not be answered by it.
+	other := daemon.SocketPath("root@other")
+	listenAt(t, other)
+	t.Setenv("REMOTE_AGENT_SOCKET", other)
+	TargetOverride = "root@other"
+
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "root@named", calls[0].Target)
+}
+
+func TestSendRequestForUsesRecordedPort(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord("root@ported", 2222))
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor("root@ported", &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, 2222, calls[0].Port)
+}
+
+func TestSendRequestForReusesRunningDaemon(t *testing.T) {
+	isolate(t)
+	listenAt(t, daemon.SocketPath("root@live"))
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	resp, err := sendRequestFor("root@live", &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	assert.True(t, resp.OK)
+	assert.Empty(t, calls, "a running daemon must not be restarted")
+}
+
+func TestSendRequestForNoAutoStartHonored(t *testing.T) {
+	isolate(t)
+	t.Setenv("REMOTE_AGENT_NO_AUTOSTART", "1")
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	assert.ErrorIs(t, err, errNoDaemon)
+	assert.Empty(t, calls)
+}
+
+func TestSendRequestForEmptyTargetFallsBackToDiscovery(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord("root@remembered", 22))
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor("", &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "root@remembered", calls[0].Target)
+}
+
+func TestDefaultTargetPrecedence(t *testing.T) {
+	isolate(t)
+	assert.Empty(t, DefaultTarget())
+
+	// A pinned socket names its host through the record beside it.
+	require.NoError(t, daemon.WriteTargetRecord("root@socket-host", 22))
+	t.Setenv("REMOTE_AGENT_SOCKET", daemon.SocketPath("root@socket-host"))
+	assert.Equal(t, "root@socket-host", DefaultTarget())
+
+	t.Setenv("REMOTE_AGENT_TARGET", "root@env-host")
+	assert.Equal(t, "root@env-host", DefaultTarget())
+
+	TargetOverride = "root@flag-host"
+	assert.Equal(t, "root@flag-host", DefaultTarget())
+}

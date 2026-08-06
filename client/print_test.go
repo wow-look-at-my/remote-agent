@@ -130,6 +130,8 @@ func TestCallWithoutDaemon(t *testing.T) {
 
 func TestDaemonBackendDelegatesToCall(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
-	// No daemon running: the adapter must surface the same failure Call does.
-	assert.Error(t, DaemonBackend{}.Call("read", map[string]any{"path": "/x"}, nil))
+	t.Setenv("REMOTE_AGENT_NO_AUTOSTART", "1")
+	// No daemon running for the named target: the adapter must surface the
+	// failure rather than answering from some other daemon.
+	assert.Error(t, DaemonBackend{}.Call("root@host", "read", map[string]any{"path": "/x"}, nil))
 }

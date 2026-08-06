@@ -20,6 +20,7 @@ type fakeBackend struct {
 }
 
 type backendCall struct {
+	Target string
 	Action string
 	Params map[string]any
 }
@@ -28,9 +29,13 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{results: map[string]any{}}
 }
 
-func (f *fakeBackend) Call(action string, params map[string]any, out any) error {
+// testTarget is the default target the test servers are built with, standing in
+// for the one `remote-agent mcp user@host` is given.
+const testTarget = "user@testhost"
+
+func (f *fakeBackend) Call(target, action string, params map[string]any, out any) error {
 	f.mu.Lock()
-	f.calls = append(f.calls, backendCall{Action: action, Params: params})
+	f.calls = append(f.calls, backendCall{Target: target, Action: action, Params: params})
 	f.mu.Unlock()
 	if f.err != nil {
 		return f.err
@@ -60,7 +65,7 @@ func exchange(t *testing.T, backend Backend, requests ...string) []map[string]an
 	t.Helper()
 	in := strings.NewReader(strings.Join(requests, "\n") + "\n")
 	var out strings.Builder
-	require.NoError(t, New(backend, "test").Serve(in, &out))
+	require.NoError(t, New(backend, "test", testTarget).Serve(in, &out))
 
 	var responses []map[string]any
 	dec := json.NewDecoder(strings.NewReader(out.String()))
@@ -180,7 +185,7 @@ func TestEmptyListEndpoints(t *testing.T) {
 }
 
 func TestMalformedStreamEndsSession(t *testing.T) {
-	err := New(newFakeBackend(), "test").Serve(strings.NewReader("{not json"), &strings.Builder{})
+	err := New(newFakeBackend(), "test", testTarget).Serve(strings.NewReader("{not json"), &strings.Builder{})
 	assert.Error(t, err)
 }
 

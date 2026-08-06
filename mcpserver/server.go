@@ -33,24 +33,30 @@ var supportedVersions = map[string]bool{
 	"2025-06-18": true,
 }
 
-// Backend performs one daemon action, decoding the result into out. It is the
+// Backend performs one daemon action against an SSH target, decoding the result
+// into out, and starts a daemon for that target when none is running. It is the
 // seam that keeps the tool layer testable without a daemon or an SSH host.
 type Backend interface {
-	Call(action string, params map[string]any, out any) error
+	Call(target, action string, params map[string]any, out any) error
 }
 
 // Server serves the remote filesystem toolset over an MCP stdio connection.
 type Server struct {
 	backend Backend
 	version string
-	tools   []tool
-	out     *json.Encoder
+	// defaultTarget is the SSH target used by calls that omit one. Empty makes
+	// the target argument mandatory on every tool.
+	defaultTarget string
+	tools         []tool
+	out           *json.Encoder
 }
 
 // New returns a server exposing the remote toolset backed by b. version is
-// reported to the client as the server version.
-func New(b Backend, version string) *Server {
-	s := &Server{backend: b, version: version}
+// reported to the client as the server version. defaultTarget, when non-empty,
+// is the SSH target tool calls act on unless they name another; when it is
+// empty every tool call must carry its own target.
+func New(b Backend, version, defaultTarget string) *Server {
+	s := &Server{backend: b, version: version, defaultTarget: defaultTarget}
 	s.tools = s.buildTools()
 	return s
 }
@@ -120,10 +126,22 @@ func (s *Server) handleInitialize(req *request) *response {
 		"protocolVersion": version,
 		"capabilities":    map[string]any{"tools": map[string]any{}},
 		"serverInfo":      map[string]any{"name": "remote-agent", "version": s.version},
-		"instructions": "Filesystem tools for the remote host reached over SSH by remote-agent. " +
-			"Every path is a path on the remote machine, the same machine Bash commands run on. " +
-			"There are no local-filesystem tools in this session -- use these for all file access.",
+		"instructions":    s.instructions(),
 	})
+}
+
+// instructions tell the client what these tools act on, and where the SSH
+// target comes from -- the one thing a caller cannot guess.
+func (s *Server) instructions() string {
+	base := "Filesystem tools for a remote host reached over SSH by remote-agent. " +
+		"Every path is a path on that remote machine, the same machine Bash commands run on. " +
+		"There are no local-filesystem tools in this session -- use these for all file access. "
+	if s.defaultTarget != "" {
+		return base + "Tools act on " + s.defaultTarget + " unless a call passes a different `target` (user@host). " +
+			"An SSH connection is opened on demand; nothing has to be started first."
+	}
+	return base + "Every call must pass `target` (user@host, or a Host alias from ~/.ssh/config) naming the machine to act on. " +
+		"An SSH connection to it is opened on demand; nothing has to be started first."
 }
 
 func (s *Server) handleToolCall(req *request) *response {
