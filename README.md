@@ -136,6 +136,22 @@ the cwd-tracking tail — stripped), while hooks and MCP servers run on the
 local machine, where the scripts and environment variables Claude prepared
 for them actually exist.
 
+### Serve remote files to any MCP client
+
+`remote-agent mcp` exposes the same toolset (`read_file`, `write_file`,
+`edit_file`, `list_dir`, `glob`, `grep`, `upload_file`, `download_file`) over the
+MCP stdio transport, to Claude Code or any other client.
+
+```json
+{ "mcpServers": { "remote": { "command": "remote-agent", "args": ["mcp"] } } }
+```
+
+Every tool takes the `target` it acts on (`user@host`, or a `Host` alias from
+`~/.ssh/config`), and the SSH connection is opened on demand — nothing has to be
+started first, and one server can act on several hosts at once. Naming a target
+(`args: ["mcp", "user@host"]`, `--target`, or `REMOTE_AGENT_TARGET`) makes it the
+default for calls that omit one; without a default, every call must carry its own.
+
 ### Commands
 
 | Command | Description |
@@ -154,7 +170,7 @@ for them actually exist.
 | `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`; the text must be unique unless `--replace-all`. |
 | `glob <pattern> [path]` | List remote files matching a glob (`**`, braces), newest first. `--limit` caps results. |
 | `grep <pattern> [path]` | Search remote file contents by regex. `--include`, `--mode`, `-i`, `-C`, `--limit`. |
-| `mcp` | Serve the remote filesystem to an MCP client over stdio (used by `claude`, usable by any MCP client). |
+| `mcp [user@host]` | Serve remote filesystems to an MCP client over stdio (used by `claude`, usable by any MCP client). Every tool takes the target it acts on; a target given here is the default. |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
 | `upload <local> <remote>` | Copy a local file to the remote. |
