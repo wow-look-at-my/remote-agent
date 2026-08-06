@@ -133,9 +133,11 @@ func (s *Server) handleInitialize(req *request) *response {
 // instructions tell the client what these tools act on, and where the SSH
 // target comes from -- the one thing a caller cannot guess.
 func (s *Server) instructions() string {
-	base := "Filesystem tools for a remote host reached over SSH by remote-agent. " +
-		"Every path is a path on that remote machine, the same machine Bash commands run on. " +
-		"There are no local-filesystem tools in this session -- use these for all file access. "
+	base := "Tools for a remote host reached over SSH by remote-agent: run_command runs a shell " +
+		"command there, and the rest read and write its files. " +
+		"Every path is a path on that remote machine, and every command runs on it. " +
+		"Use these for all file access and all command execution -- nothing here touches the local machine " +
+		"except upload_file and download_file, which say so. "
 	if s.defaultTarget != "" {
 		return base + "Tools act on " + s.defaultTarget + " unless a call passes a different `target` (user@host). " +
 			"An SSH connection is opened on demand; nothing has to be started first."

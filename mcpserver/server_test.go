@@ -119,7 +119,7 @@ func TestToolsList(t *testing.T) {
 		schema := tool["inputSchema"].(map[string]any)
 		assert.Equal(t, "object", schema["type"])
 	}
-	for _, want := range []string{"read_file", "write_file", "edit_file", "list_dir", "glob", "grep", "upload_file", "download_file"} {
+	for _, want := range []string{"run_command", "read_file", "write_file", "edit_file", "list_dir", "glob", "grep", "upload_file", "download_file"} {
 		assert.True(t, names[want], "missing tool %s", want)
 	}
 }

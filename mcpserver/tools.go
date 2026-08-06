@@ -15,6 +15,9 @@ const (
 	// maxImageBytes is the largest image returned inline; anything bigger is
 	// refused rather than blown up into megabytes of base64.
 	maxImageBytes = 5 << 20
+	// maxOutputBytes caps each of a command's output streams. A build log can
+	// run to megabytes, which is context spent for nothing.
+	maxOutputBytes = 64 << 10
 )
 
 // tool is one MCP tool: the wire-facing declaration plus its handler.
@@ -36,6 +39,21 @@ type tool struct {
 // arrives, and one server can serve several hosts in a session.
 func (s *Server) buildTools() []tool {
 	return []tool{
+		s.tool(tool{
+			Name: "run_command",
+			Description: "Run a shell command on the REMOTE host and return its output. " +
+				"This is the only way to execute anything in this session -- there is no local shell tool. " +
+				"Each call is a separate one-shot shell, so a `cd` does not carry to the next call: pass cwd instead. " +
+				"A non-zero exit is reported as an error, with whatever the command printed.",
+			InputSchema: schema(
+				props{
+					"command": prop("string", "Shell command line, run by the remote user's shell."),
+					"cwd":     prop("string", "Absolute directory on the remote host to run it in (default the remote home directory)."),
+				},
+				"command",
+			),
+			handler: s.runCommand,
+		}),
 		s.tool(tool{
 			Name: "read_file",
 			Description: "Read a file on the REMOTE host (the same machine Bash commands run on). " +

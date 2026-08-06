@@ -126,7 +126,7 @@ connect.
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
 | `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
-| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
+| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote shells and filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
 | `fswire/` | The mount's wire protocol: request/response types, length-prefixed framing with binary payloads, and portable open-flag translation. Standard library only, so both ends share it. |
 | `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
@@ -242,6 +242,13 @@ connect.
 - **Mount caching is deliberately short**: 1s for attributes and entries, and
   negative lookups are not cached at all, because a file a forwarded build
   command just created has to be visible to the next read.
+- **`run_command` is the MCP server's shell** (`mcpserver/handlers.go`). It
+  reaches the daemon's `exec`, so it inherits the `ls` rewrite: a plain
+  `ls <path>` comes back as a `DirListing`, not an `ExecResult`, and `execReply`
+  decodes both -- reading only the command shape turned `ls /srv` into an empty
+  success. A non-zero exit is returned as a tool error carrying the output, each
+  stream is capped at 64 KiB with the drop stated, and `cwd` is prefixed as a
+  shell-quoted `cd` because each call is a fresh one-shot shell.
 - **Every MCP tool call carries its own target** (`target` argument; `s.tool`
   in `mcpserver/tools.go` adds it, `client.CallTarget` routes it). Selecting
   the daemon from process state instead -- a pinned socket, `--target`, a lone
@@ -344,6 +351,7 @@ connect.
    `daemon/handler.go`.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
 5. If the model should be able to use it through `remote-agent claude
-   --no-mount`, add a tool for it in `mcpserver/tools.go` (declaration +
-   handler calling `s.backend.Call`). A mounted session needs nothing: the
-   model reaches files with its ordinary tools.
+   --no-mount`, or through `remote-agent mcp` in any other client, add a tool
+   for it in `mcpserver/tools.go` (declaration) plus its handler in
+   `mcpserver/handlers.go` (calling `s.backend.Call`). A mounted claude session
+   needs nothing: the model reaches files with its ordinary tools.

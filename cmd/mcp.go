@@ -14,11 +14,11 @@ import (
 // MCP client by hand (see README).
 var mcpCmd = &cobra.Command{
 	Use:   "mcp [user@host]",
-	Short: "Serve remote filesystem tools to an MCP client over stdio",
-	Long: `Serve a remote host's filesystem to an MCP client over stdio.
+	Short: "Serve remote command and filesystem tools to an MCP client over stdio",
+	Long: `Serve a remote host's shell and filesystem to an MCP client over stdio.
 
-Exposes read_file, write_file, edit_file, list_dir, glob, grep, upload_file and
-download_file. Every tool takes a "target" argument (user@host, or a Host alias
+Exposes run_command, read_file, write_file, edit_file, list_dir, glob, grep,
+upload_file and download_file. Every tool takes a "target" argument (user@host, or a Host alias
 from ~/.ssh/config) naming the machine it acts on, and the SSH connection to
 that machine is opened on demand -- nothing has to be started first, and one
 server can act on several hosts in a session.

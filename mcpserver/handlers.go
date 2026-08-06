@@ -153,10 +153,15 @@ func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
 	if err := s.backend.Call(target, "ls", params, &listing); err != nil {
 		return nil, err
 	}
-	if len(listing.Entries) == 0 {
-		return text(fmt.Sprintf("%s is empty.", listing.Path)), nil
-	}
+	return text(formatListing(&listing)), nil
+}
 
+// formatListing renders a directory listing: one entry per line, tagged by
+// kind.
+func formatListing(listing *protocol.DirListing) string {
+	if len(listing.Entries) == 0 {
+		return fmt.Sprintf("%s is empty.", listing.Path)
+	}
 	var b strings.Builder
 	for _, e := range listing.Entries {
 		switch {
@@ -168,7 +173,89 @@ func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
 			fmt.Fprintf(&b, "f %s (%d bytes)\n", e.Name, e.Size)
 		}
 	}
+	return b.String()
+}
+
+// execReply covers both shapes the exec action answers with: a command result,
+// and the directory listing the daemon substitutes when the command is a plain
+// `ls [path]` (parseLsCommand in daemon/ops.go). Decoding only the first would
+// turn `ls /srv` into an empty, successful-looking result.
+type execReply struct {
+	protocol.ExecResult
+	protocol.DirListing
+}
+
+func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
+	target, err := s.target(args)
+	if err != nil {
+		return nil, err
+	}
+	command, err := requiredString(args, "command")
+	if err != nil {
+		return nil, err
+	}
+	// Each command is a separate one-shot shell on the remote, so a working
+	// directory has to travel with it; `cd` in one command does not carry to
+	// the next.
+	if cwd := stringArg(args, "cwd"); cwd != "" {
+		command = "cd " + shellQuote(cwd) + " && " + command
+	}
+
+	var reply execReply
+	if err := s.backend.Call(target, "exec", map[string]any{"command": command}, &reply); err != nil {
+		return nil, err
+	}
+	if reply.Entries != nil {
+		return text(formatListing(&reply.DirListing)), nil
+	}
+	return execOutput(&reply.ExecResult)
+}
+
+// execOutput renders a finished command. A non-zero exit is returned as an
+// error so the caller cannot read a failure as success -- the output it did
+// produce travels with it, since that is usually where the reason is.
+func execOutput(result *protocol.ExecResult) ([]contentBlock, error) {
+	out := strings.TrimRight(result.Stdout, "\n")
+	errOut := strings.TrimRight(result.Stderr, "\n")
+
+	var b strings.Builder
+	if out != "" {
+		b.WriteString(truncateOutput(out, "stdout"))
+	}
+	if errOut != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "[stderr]\n%s", truncateOutput(errOut, "stderr"))
+	}
+
+	if result.ExitCode != 0 {
+		if b.Len() == 0 {
+			return nil, fmt.Errorf("command exited %d with no output", result.ExitCode)
+		}
+		return nil, fmt.Errorf("command exited %d:\n%s", result.ExitCode, b.String())
+	}
+	if b.Len() == 0 {
+		return text("(no output; exit 0)"), nil
+	}
 	return text(b.String()), nil
+}
+
+// truncateOutput keeps a command's output inside a size a model can read,
+// saying plainly what was dropped rather than silently ending mid-stream.
+func truncateOutput(s, name string) string {
+	if len(s) <= maxOutputBytes {
+		return s
+	}
+	head := maxOutputBytes / 2
+	tail := maxOutputBytes - head
+	return fmt.Sprintf("%s\n\n[... %d bytes of %s dropped from the middle; rerun narrowing the output ...]\n\n%s",
+		strings.ToValidUTF8(s[:head], ""), len(s)-maxOutputBytes, name, strings.ToValidUTF8(s[len(s)-tail:], ""))
+}
+
+// shellQuote wraps a string so a POSIX shell reads it as one literal word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
