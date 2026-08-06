@@ -63,9 +63,9 @@ func listenAt(t *testing.T, sockPath string) {
 func stubStart(t *testing.T, calls *[]daemon.TargetRecord) {
 	t.Helper()
 	prev := startDaemonFunc
-	startDaemonFunc = func(self, target string, port int, logPath string) (*os.Process, error) {
-		*calls = append(*calls, daemon.TargetRecord{Target: target, Port: port})
-		listenAt(t, daemon.SocketPath(target))
+	startDaemonFunc = func(self string, rec daemon.TargetRecord, logPath string) (*os.Process, error) {
+		*calls = append(*calls, rec)
+		listenAt(t, daemon.SocketPath(rec.Target))
 		return nil, nil
 	}
 	t.Cleanup(func() { startDaemonFunc = prev })
@@ -91,7 +91,7 @@ func TestResolveTargetFlagBeatsEnv(t *testing.T) {
 
 func TestResolveTargetPortFromRecordAndEnv(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@host", 2222))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@host", Port: 2222}))
 
 	TargetOverride = "root@host"
 	rec, err := resolveTarget()
@@ -106,7 +106,7 @@ func TestResolveTargetPortFromRecordAndEnv(t *testing.T) {
 
 func TestResolveTargetFromRecord(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@remembered", 2222))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 2222}))
 	rec, err := resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, "root@remembered", rec.Target)
@@ -121,8 +121,8 @@ func TestResolveTargetNoneKnown(t *testing.T) {
 
 func TestResolveTargetAmbiguous(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@a", 22))
-	require.NoError(t, daemon.WriteTargetRecord("root@b", 22))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@a", Port: 22}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@b", Port: 22}))
 	_, err := resolveTarget()
 	assert.ErrorContains(t, err, "several targets known")
 	assert.ErrorContains(t, err, "root@a")
@@ -130,7 +130,7 @@ func TestResolveTargetAmbiguous(t *testing.T) {
 
 func TestSendRequestAutoStartsFromRecord(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@remembered", 2222))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 2222}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
@@ -167,10 +167,10 @@ func TestSendRequestRestartsStaleSocket(t *testing.T) {
 
 	var calls []daemon.TargetRecord
 	prev := startDaemonFunc
-	startDaemonFunc = func(self, target string, port int, logPath string) (*os.Process, error) {
-		calls = append(calls, daemon.TargetRecord{Target: target, Port: port})
-		os.Remove(daemon.SocketPath(target)) // as a real daemon does before listening
-		listenAt(t, daemon.SocketPath(target))
+	startDaemonFunc = func(self string, rec daemon.TargetRecord, logPath string) (*os.Process, error) {
+		calls = append(calls, rec)
+		os.Remove(daemon.SocketPath(rec.Target)) // as a real daemon does before listening
+		listenAt(t, daemon.SocketPath(rec.Target))
 		return nil, nil
 	}
 	t.Cleanup(func() { startDaemonFunc = prev })
@@ -233,7 +233,7 @@ func TestAutoStartDaemonReportsStartFailure(t *testing.T) {
 	isolate(t)
 	TargetOverride = "root@host"
 	prev := startDaemonFunc
-	startDaemonFunc = func(self, target string, port int, logPath string) (*os.Process, error) {
+	startDaemonFunc = func(self string, rec daemon.TargetRecord, logPath string) (*os.Process, error) {
 		return nil, assert.AnError
 	}
 	t.Cleanup(func() { startDaemonFunc = prev })
@@ -264,7 +264,7 @@ func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	resp, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	resp, err := sendRequestFor(protocol.Route{Target: "root@named"}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	assert.True(t, resp.OK)
 	require.Len(t, calls, 1)
@@ -283,7 +283,7 @@ func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	_, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	_, err := sendRequestFor(protocol.Route{Target: "root@named"}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	require.Len(t, calls, 1)
 	assert.Equal(t, "root@named", calls[0].Target)
@@ -291,11 +291,11 @@ func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 
 func TestSendRequestForUsesRecordedPort(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@ported", 2222))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@ported", Port: 2222}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	_, err := sendRequestFor("root@ported", &protocol.DaemonRequest{Action: "ls"})
+	_, err := sendRequestFor(protocol.Route{Target: "root@ported"}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	require.Len(t, calls, 1)
 	assert.Equal(t, 2222, calls[0].Port)
@@ -307,7 +307,7 @@ func TestSendRequestForReusesRunningDaemon(t *testing.T) {
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	resp, err := sendRequestFor("root@live", &protocol.DaemonRequest{Action: "ls"})
+	resp, err := sendRequestFor(protocol.Route{Target: "root@live"}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	assert.True(t, resp.OK)
 	assert.Empty(t, calls, "a running daemon must not be restarted")
@@ -319,18 +319,18 @@ func TestSendRequestForNoAutoStartHonored(t *testing.T) {
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	_, err := sendRequestFor("root@named", &protocol.DaemonRequest{Action: "ls"})
+	_, err := sendRequestFor(protocol.Route{Target: "root@named"}, &protocol.DaemonRequest{Action: "ls"})
 	assert.ErrorIs(t, err, errNoDaemon)
 	assert.Empty(t, calls)
 }
 
 func TestSendRequestForEmptyTargetFallsBackToDiscovery(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord("root@remembered", 22))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 22}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	_, err := sendRequestFor("", &protocol.DaemonRequest{Action: "ls"})
+	_, err := sendRequestFor(protocol.Route{Target: ""}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	require.Len(t, calls, 1)
 	assert.Equal(t, "root@remembered", calls[0].Target)
@@ -341,7 +341,7 @@ func TestDefaultTargetPrecedence(t *testing.T) {
 	assert.Empty(t, DefaultTarget())
 
 	// A pinned socket names its host through the record beside it.
-	require.NoError(t, daemon.WriteTargetRecord("root@socket-host", 22))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@socket-host", Port: 22}))
 	t.Setenv("REMOTE_AGENT_SOCKET", daemon.SocketPath("root@socket-host"))
 	assert.Equal(t, "root@socket-host", DefaultTarget())
 
@@ -350,4 +350,82 @@ func TestDefaultTargetPrecedence(t *testing.T) {
 
 	TargetOverride = "root@flag-host"
 	assert.Equal(t, "root@flag-host", DefaultTarget())
+}
+
+func TestSendRequestForStartsDaemonThroughControlMaster(t *testing.T) {
+	isolate(t)
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor(protocol.Route{
+		Target:      "root@locked-down",
+		ControlPath: "/tmp/cm.sock",
+	}, &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "/tmp/cm.sock", calls[0].ControlPath,
+		"the control socket the call named must reach the daemon being started")
+}
+
+// A daemon that idled out is restarted through the same control master it used
+// before, without the caller having to name it again.
+func TestControlPathRememberedAcrossRestarts(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{
+		Target: "root@remembered", Port: 22, ControlPath: "/tmp/remembered.sock",
+	}))
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	_, err := sendRequestFor(protocol.Route{Target: "root@remembered"}, &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "/tmp/remembered.sock", calls[0].ControlPath)
+}
+
+func TestControlPathFromFlagAndEnv(t *testing.T) {
+	isolate(t)
+	t.Setenv("REMOTE_AGENT_CONTROL_PATH", "/tmp/env.sock")
+	assert.Equal(t, "/tmp/env.sock", ControlPathFor(protocol.Route{}))
+
+	ControlPathOverride = "/tmp/flag.sock"
+	t.Cleanup(func() { ControlPathOverride = "" })
+	assert.Equal(t, "/tmp/flag.sock", ControlPathFor(protocol.Route{}))
+
+	// A call that names its own beats both: one server, several hosts.
+	assert.Equal(t, "/tmp/call.sock", ControlPathFor(protocol.Route{ControlPath: "/tmp/call.sock"}))
+}
+
+// A running daemon cannot be re-pointed at another control master, so a call
+// naming a different one must fail rather than run on the wrong connection.
+func TestCallThroughDifferentControlMasterIsRefused(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{
+		Target: "root@live", Port: 22, ControlPath: "/tmp/first.sock",
+	}))
+	listenAt(t, daemon.SocketPath("root@live"))
+
+	_, err := sendRequestFor(protocol.Route{
+		Target: "root@live", ControlPath: "/tmp/second.sock",
+	}, &protocol.DaemonRequest{Action: "ls"})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "/tmp/first.sock")
+	assert.ErrorContains(t, err, "disconnect")
+
+	// The same socket is fine, and so is a daemon that is not running.
+	_, err = sendRequestFor(protocol.Route{
+		Target: "root@live", ControlPath: "/tmp/first.sock",
+	}, &protocol.DaemonRequest{Action: "ls"})
+	assert.NoError(t, err)
+}
+
+func TestDirectDaemonRefusesControlPathCall(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@direct", Port: 22}))
+	listenAt(t, daemon.SocketPath("root@direct"))
+
+	_, err := sendRequestFor(protocol.Route{
+		Target: "root@direct", ControlPath: "/tmp/cm.sock",
+	}, &protocol.DaemonRequest{Action: "ls"})
+	assert.ErrorContains(t, err, "no control master")
 }

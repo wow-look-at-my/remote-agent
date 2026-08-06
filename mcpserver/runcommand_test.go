@@ -19,7 +19,7 @@ func TestRunCommand(t *testing.T) {
 	call := backend.lastCall(t)
 	assert.Equal(t, "exec", call.Action)
 	assert.Equal(t, "echo hello", call.Params["command"])
-	assert.Equal(t, testTarget, call.Target)
+	assert.Equal(t, testTarget, call.Route.Target)
 }
 
 func TestRunCommandInDirectory(t *testing.T) {
@@ -94,4 +94,73 @@ func TestRunCommandTruncatesHugeOutput(t *testing.T) {
 func TestRunCommandRequiresCommand(t *testing.T) {
 	_, err := call(t, newFakeBackend(), "run_command", map[string]any{})
 	assert.ErrorContains(t, err, "command")
+}
+
+// A call that names a control socket must reach the daemon layer with it: that
+// is the whole path by which "here is a control file" becomes a connection.
+func TestControlPathTravelsWithTheCall(t *testing.T) {
+	backend := newFakeBackend()
+	backend.results["exec"] = protocol.ExecResult{Stdout: "ok\n"}
+
+	callText(t, backend, "run_command", map[string]any{
+		"command":      "uptime",
+		"target":       "root@locked-down",
+		"control_path": "/tmp/cm-root@locked-down:22",
+	})
+	assert.Equal(t, protocol.Route{
+		Target:      "root@locked-down",
+		ControlPath: "/tmp/cm-root@locked-down:22",
+	}, backend.lastCall(t).Route)
+}
+
+func TestControlPathAppliesToEveryTool(t *testing.T) {
+	args := map[string]map[string]any{
+		"run_command":   {"command": "true"},
+		"read_file":     {"path": "/f"},
+		"write_file":    {"path": "/f", "content": "x"},
+		"edit_file":     {"path": "/f", "old_string": "a", "new_string": "b"},
+		"list_dir":      {"path": "/d"},
+		"glob":          {"pattern": "*.go"},
+		"grep":          {"pattern": "x"},
+		"upload_file":   {"local_path": "/l", "remote_path": "/r"},
+		"download_file": {"remote_path": "/r", "local_path": "/l"},
+	}
+	for name, toolArgs := range args {
+		t.Run(name, func(t *testing.T) {
+			backend := newFakeBackend()
+			toolArgs["control_path"] = "/tmp/cm.sock"
+			_, err := call(t, backend, name, toolArgs)
+			require.NoError(t, err)
+			assert.Equal(t, "/tmp/cm.sock", backend.lastCall(t).Route.ControlPath)
+		})
+	}
+}
+
+// The server-level default covers a client that was started with a control
+// socket; a call naming its own still wins.
+func TestControlPathDefaultAndOverride(t *testing.T) {
+	backend := newFakeBackend()
+	backend.results["exec"] = protocol.ExecResult{}
+	s := New(backend, "test", testTarget, "/tmp/default.sock")
+
+	_, err := s.lookup("run_command").handler(map[string]any{"command": "true"})
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/default.sock", backend.lastCall(t).Route.ControlPath)
+
+	_, err = s.lookup("run_command").handler(map[string]any{"command": "true", "control_path": "/tmp/other.sock"})
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/other.sock", backend.lastCall(t).Route.ControlPath)
+}
+
+// The argument has to be advertised, or a model has no way to know it exists.
+func TestControlPathIsDeclaredOnEveryTool(t *testing.T) {
+	for _, tool := range New(newFakeBackend(), "test", testTarget, "").tools {
+		props := tool.InputSchema["properties"].(map[string]any)
+		require.Contains(t, props, "control_path", "%s must advertise control_path", tool.Name)
+		desc := props["control_path"].(map[string]any)["description"].(string)
+		assert.Contains(t, desc, "ControlPath", "%s should name what it takes", tool.Name)
+		// Optional: most hosts need no master, and ssh_config may name one.
+		required, _ := tool.InputSchema["required"].([]string)
+		assert.NotContains(t, required, "control_path")
+	}
 }

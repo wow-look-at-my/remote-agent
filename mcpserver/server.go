@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
 // protocolVersion is the MCP revision this server implements. A client that
@@ -33,11 +35,12 @@ var supportedVersions = map[string]bool{
 	"2025-06-18": true,
 }
 
-// Backend performs one daemon action against an SSH target, decoding the result
-// into out, and starts a daemon for that target when none is running. It is the
-// seam that keeps the tool layer testable without a daemon or an SSH host.
+// Backend performs one daemon action against the host a route names, decoding
+// the result into out, and starts a daemon for that route when none is running.
+// It is the seam that keeps the tool layer testable without a daemon or an SSH
+// host.
 type Backend interface {
-	Call(target, action string, params map[string]any, out any) error
+	Call(route protocol.Route, action string, params map[string]any, out any) error
 }
 
 // Server serves the remote filesystem toolset over an MCP stdio connection.
@@ -47,16 +50,25 @@ type Server struct {
 	// defaultTarget is the SSH target used by calls that omit one. Empty makes
 	// the target argument mandatory on every tool.
 	defaultTarget string
-	tools         []tool
-	out           *json.Encoder
+	// defaultControlPath is the control-master socket used by calls that name
+	// none. Empty leaves the choice to ssh_config, per host.
+	defaultControlPath string
+	tools              []tool
+	out                *json.Encoder
 }
 
 // New returns a server exposing the remote toolset backed by b. version is
 // reported to the client as the server version. defaultTarget, when non-empty,
 // is the SSH target tool calls act on unless they name another; when it is
-// empty every tool call must carry its own target.
-func New(b Backend, version, defaultTarget string) *Server {
-	s := &Server{backend: b, version: version, defaultTarget: defaultTarget}
+// empty every tool call must carry its own target. defaultControlPath is the
+// control master calls ride unless they name their own.
+func New(b Backend, version, defaultTarget, defaultControlPath string) *Server {
+	s := &Server{
+		backend:            b,
+		version:            version,
+		defaultTarget:      defaultTarget,
+		defaultControlPath: defaultControlPath,
+	}
 	s.tools = s.buildTools()
 	return s
 }

@@ -171,31 +171,49 @@ func (s *Server) buildTools() []tool {
 	}
 }
 
-// tool adds the target argument every tool takes. It is required exactly when
-// the server has no default target, so a call can never be routed to a host
-// nobody named.
+// tool adds the routing arguments every tool takes: which host to act on, and
+// optionally the control master to reach it through. target is required
+// exactly when the server has no default, so a call can never be routed to a
+// host nobody named.
 func (s *Server) tool(t tool) tool {
 	desc := "SSH target to act on, e.g. user@host or a Host alias from ~/.ssh/config. " +
 		"The connection is opened on demand."
 	if s.defaultTarget != "" {
-		t.InputSchema = addProp(t.InputSchema, "target", prop("string", desc+" Defaults to "+s.defaultTarget+"."))
-		return t
+		desc += " Defaults to " + s.defaultTarget + "."
 	}
 	t.InputSchema = addProp(t.InputSchema, "target", prop("string", desc))
-	t.InputSchema = addRequired(t.InputSchema, "target")
+	if s.defaultTarget == "" {
+		t.InputSchema = addRequired(t.InputSchema, "target")
+	}
+
+	controlDesc := "Path to an OpenSSH control-master socket (ControlPath) to run through, " +
+		"e.g. /tmp/cm-user@host:22. Pass this when you have been given a control socket for the host: " +
+		"the connection is borrowed from that master, so no separate authentication happens -- " +
+		"which is the only way in when the host needs a one-time password or a hardware key. " +
+		"Naming one makes it mandatory: the call fails rather than opening its own connection. " +
+		"Omit it when the host needs no master or ~/.ssh/config already sets a ControlPath for it."
+	if s.defaultControlPath != "" {
+		controlDesc += " Defaults to " + s.defaultControlPath + "."
+	}
+	t.InputSchema = addProp(t.InputSchema, "control_path", prop("string", controlDesc))
 	return t
 }
 
-// target resolves which host a call acts on: its own target argument, else the
-// server default.
-func (s *Server) target(args map[string]any) (string, error) {
-	if t := stringArg(args, "target"); t != "" {
-		return t, nil
+// route resolves where a call goes: which host, and how to reach it. Both come
+// from the call itself, falling back to the server's defaults.
+func (s *Server) route(args map[string]any) (protocol.Route, error) {
+	target := stringArg(args, "target")
+	if target == "" {
+		target = s.defaultTarget
 	}
-	if s.defaultTarget != "" {
-		return s.defaultTarget, nil
+	if target == "" {
+		return protocol.Route{}, fmt.Errorf("missing required argument: target (the SSH target to act on, e.g. user@host)")
 	}
-	return "", fmt.Errorf("missing required argument: target (the SSH target to act on, e.g. user@host)")
+	controlPath := stringArg(args, "control_path")
+	if controlPath == "" {
+		controlPath = s.defaultControlPath
+	}
+	return protocol.Route{Target: target, ControlPath: controlPath}, nil
 }
 
 // Schema helpers keep the tool declarations readable.

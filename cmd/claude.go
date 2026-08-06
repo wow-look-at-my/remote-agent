@@ -72,15 +72,16 @@ Examples:
 		}
 
 		return client.LaunchClaude(client.LaunchOptions{
-			Target:     target,
-			Port:       port,
-			ClaudeBin:  claudeBin,
-			ClaudeArgs: claudeArgs,
-			KeepDaemon: keep,
-			LocalTools: localTools,
-			RemoteDir:  remoteDir,
-			MountAt:    mountAt,
-			NoMount:    noMount,
+			Target:      target,
+			Port:        port,
+			ClaudeBin:   claudeBin,
+			ClaudeArgs:  claudeArgs,
+			KeepDaemon:  keep,
+			LocalTools:  localTools,
+			RemoteDir:   remoteDir,
+			MountAt:     mountAt,
+			NoMount:     noMount,
+			ControlPath: client.ControlPathOverride,
 		})
 	},
 }

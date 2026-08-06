@@ -133,5 +133,5 @@ func TestDaemonBackendDelegatesToCall(t *testing.T) {
 	t.Setenv("REMOTE_AGENT_NO_AUTOSTART", "1")
 	// No daemon running for the named target: the adapter must surface the
 	// failure rather than answering from some other daemon.
-	assert.Error(t, DaemonBackend{}.Call("root@host", "read", map[string]any{"path": "/x"}, nil))
+	assert.Error(t, DaemonBackend{}.Call(protocol.Route{Target: "root@host"}, "read", map[string]any{"path": "/x"}, nil))
 }

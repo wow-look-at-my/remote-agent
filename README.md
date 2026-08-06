@@ -154,6 +154,22 @@ started first, and one server can act on several hosts at once. Naming a target
 (`args: ["mcp", "user@host"]`, `--target`, or `REMOTE_AGENT_TARGET`) makes it the
 default for calls that omit one; without a default, every call must carry its own.
 
+**Given a control socket for a host, pass it as `control_path`** — every tool
+takes it, alongside `target`:
+
+```json
+{"name": "run_command",
+ "arguments": {"target": "root@10.0.0.7",
+               "control_path": "/tmp/cm-root@10.0.0.7:22",
+               "command": "systemctl status nginx"}}
+```
+
+The call borrows the connection that master already authenticated, which is
+what makes a host behind a one-time password or a hardware key reachable at
+all. Naming one makes it mandatory — the call fails rather than opening its
+own connection. Omit it when `~/.ssh/config` already sets a `ControlPath` for
+the host (used automatically) or when the host needs no master.
+
 ### Commands
 
 | Command | Description |

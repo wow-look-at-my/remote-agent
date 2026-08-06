@@ -19,13 +19,13 @@ connection to the host.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
-		controlPath, _ := cmd.Flags().GetString("control-path")
-		return client.Connect(args[0], port, controlPath)
+		// --control-path is a global flag; client resolves it (flag, then
+		// REMOTE_AGENT_CONTROL_PATH) so every entry point agrees.
+		return client.Connect(args[0], port, "")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(connectCmd)
 	connectCmd.Flags().Int("port", 22, "SSH port")
-	connectCmd.Flags().String("control-path", "", "OpenSSH control-master socket to run commands through (required once given)")
 }

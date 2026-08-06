@@ -148,6 +148,15 @@ connect.
   `shellEscape` (`daemon/daemon.go`).
 - **Errors** wrap with `%w`; handlers return `errResponse(err)` / `okResponse(data)`
   (`daemon/handler.go`).
+- **Every capability has to be reachable per call, from the MCP tools.** A
+  model is handed a host, a control socket, a directory *mid-session* and
+  cannot restart its own MCP server, so a capability that exists only as a
+  flag or environment variable the server was started with does not exist for
+  it. Anything the daemon can do gets a tool argument (routing on every tool
+  via `s.tool`, or an argument on the tool it belongs to) — not a setup step
+  in a README. This shipped as three separate fixes (`target`, `run_command`,
+  `control_path`) that were all this same defect; check it before adding a
+  capability, not after someone reports being stuck.
 
 ## Gotchas
 
@@ -249,6 +258,16 @@ connect.
   success. A non-zero exit is returned as a tool error carrying the output, each
   stream is capped at 64 KiB with the drop stated, and `cwd` is prefixed as a
   shell-quoted `cd` because each call is a fresh one-shot shell.
+- **A control socket is named per call too**: `control_path` on every MCP tool,
+  `--control-path` (global flag) and `REMOTE_AGENT_CONTROL_PATH` for the CLI
+  and the launcher, resolved by `client.ControlPathFor` in that order. It
+  rides `protocol.Route` with the target into `client.CallRoute`, which starts
+  that target's daemon through that master. Naming one makes it **mandatory**
+  (the daemon fails rather than dialing its own connection), the daemon's
+  target record remembers it so a restart reuses it, and a call naming a
+  *different* socket than the running daemon uses is refused rather than
+  silently answered over the wrong connection (`checkControlPath`).
+  docs/ssh/control-sockets.md has the worked examples.
 - **Every MCP tool call carries its own target** (`target` argument; `s.tool`
   in `mcpserver/tools.go` adds it, `client.CallTarget` routes it). Selecting
   the daemon from process state instead -- a pinned socket, `--target`, a lone
@@ -350,8 +369,10 @@ connect.
 3. A `handle<Name>` handler in `daemon/ops.go`, wired into the switch in
    `daemon/handler.go`.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
-5. If the model should be able to use it through `remote-agent claude
-   --no-mount`, or through `remote-agent mcp` in any other client, add a tool
-   for it in `mcpserver/tools.go` (declaration) plus its handler in
-   `mcpserver/handlers.go` (calling `s.backend.Call`). A mounted claude session
-   needs nothing: the model reaches files with its ordinary tools.
+5. Add a tool for it in `mcpserver/tools.go` (declaration) plus its handler in
+   `mcpserver/handlers.go` (`s.route(args)`, then `s.backend.Call(route, ...)`)
+   — that is how the model reaches it through `remote-agent mcp` in any client,
+   and through `remote-agent claude --no-mount`. Anything the command needs to
+   be told is an argument on the tool, per the per-call rule in Conventions. A
+   mounted claude session needs nothing extra for *file* access: the model
+   reaches files with its ordinary tools through the mount.

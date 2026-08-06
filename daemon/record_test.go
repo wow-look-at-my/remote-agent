@@ -13,7 +13,7 @@ func TestTargetRecordRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
 
-	require.NoError(t, WriteTargetRecord("root@host", 2222))
+	require.NoError(t, WriteTargetRecord(TargetRecord{Target: "root@host", Port: 2222}))
 
 	rec, err := ReadTargetRecord(TargetPath("root@host"))
 	require.NoError(t, err)
@@ -30,8 +30,8 @@ func TestListTargetRecords(t *testing.T) {
 	t.Setenv("TMPDIR", dir)
 	assert.Empty(t, ListTargetRecords())
 
-	require.NoError(t, WriteTargetRecord("root@a", 22))
-	require.NoError(t, WriteTargetRecord("root@b", 22))
+	require.NoError(t, WriteTargetRecord(TargetRecord{Target: "root@a", Port: 22}))
+	require.NoError(t, WriteTargetRecord(TargetRecord{Target: "root@b", Port: 22}))
 	// Damaged records are skipped rather than failing the lookup.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "remote-agent-junk.target"), []byte("not json"), 0600))
 

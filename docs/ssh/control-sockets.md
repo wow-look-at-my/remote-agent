@@ -46,6 +46,64 @@ deploy, and the FUSE mount (a mount is one long-lived session on the master).
 There is no per-command `ssh` process — remote-agent speaks the control
 socket's protocol directly.
 
+## Through the MCP server (what to do when someone hands you a control file)
+
+Every tool `remote-agent mcp` exposes takes an optional **`control_path`**
+next to `target`. That is the answer to "here is a control socket for the box,
+go look at it": put the socket path in the call.
+
+```json
+{
+  "name": "run_command",
+  "arguments": {
+    "target": "root@10.0.0.7",
+    "control_path": "/tmp/cm-root@10.0.0.7:22",
+    "command": "systemctl status nginx"
+  }
+}
+```
+
+- **It works on every tool**, not just `run_command` — `read_file`, `glob`,
+  `grep`, `write_file`, `edit_file`, `list_dir`, `upload_file`,
+  `download_file` all take it.
+- **`target` is still required.** The master already knows which host it is
+  connected to, so the target is what names *this* daemon (its socket path is a
+  hash of the target) and what appears in messages. Use the host the master
+  points at.
+- **Naming a socket makes it mandatory.** The call runs through that master or
+  fails; it never quietly opens its own connection to the host. That is the
+  point when the host cannot be authenticated to unattended.
+- **The first call starts the daemon** for that target through that master, and
+  every later call reuses it. There is nothing to set up first.
+- **One socket per target, per daemon.** A daemon is shared and long-lived, so
+  a later call naming a *different* control socket for the same target is
+  refused, naming the one in use — otherwise it would silently run on the
+  wrong connection. Switch with `remote-agent disconnect --target <target>`
+  and call again.
+- **Omit it** when ~/.ssh/config already sets a `ControlPath` for the host (it
+  is picked up automatically) or when the host needs no master at all.
+
+A client can also be given a default for calls that name none:
+
+```json
+{ "mcpServers": { "remote": {
+  "command": "remote-agent",
+  "args": ["mcp", "root@10.0.0.7", "--control-path", "/tmp/cm-root@10.0.0.7:22"]
+} } }
+```
+
+`REMOTE_AGENT_CONTROL_PATH` in the server's environment does the same. Neither
+helps an agent that is handed a socket mid-session, which is why the argument
+exists on the call.
+
+The same flag works on every CLI command:
+
+```sh
+remote-agent --target root@10.0.0.7 --control-path /tmp/cm.sock exec 'uptime'
+remote-agent connect root@10.0.0.7 --control-path /tmp/cm.sock
+remote-agent claude root@10.0.0.7 --control-path /tmp/cm.sock
+```
+
 ## What it does not do
 
 - **No host-key fingerprint of ours.** The master verified the host key when it

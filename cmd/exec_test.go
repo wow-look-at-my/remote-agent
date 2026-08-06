@@ -201,3 +201,22 @@ func TestApplyGlobalFlagsErrors(t *testing.T) {
 	_, err = applyGlobalFlags([]string{"--json=maybe", "ls"})
 	assert.ErrorContains(t, err, "boolean")
 }
+
+func TestApplyGlobalFlagsControlPath(t *testing.T) {
+	defer func(prev string) { client.ControlPathOverride = prev }(client.ControlPathOverride)
+
+	for _, args := range [][]string{
+		{"--control-path", "/tmp/cm.sock", "uptime"},
+		{"--control-path=/tmp/cm.sock", "uptime"},
+	} {
+		client.ControlPathOverride = ""
+		rest, err := applyGlobalFlags(args)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"uptime"}, rest)
+		assert.Equal(t, "/tmp/cm.sock", client.ControlPathOverride)
+	}
+
+	client.ControlPathOverride = ""
+	_, err := applyGlobalFlags([]string{"--control-path"})
+	assert.ErrorContains(t, err, "needs a value")
+}

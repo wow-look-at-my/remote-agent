@@ -15,7 +15,7 @@ import (
 // declarations they are attached to live in tools.go.
 
 func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var info protocol.FileInfo
-	if err := s.backend.Call(target, "read", map[string]any{"path": path}, &info); err != nil {
+	if err := s.backend.Call(route, "read", map[string]any{"path": path}, &info); err != nil {
 		return nil, err
 	}
 	data, err := fileBytes(info)
@@ -83,7 +83,7 @@ func numberLines(content string, offset, limit int) string {
 }
 
 func (s *Server) writeFile(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -101,14 +101,14 @@ func (s *Server) writeFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	if err := s.backend.Call(target, "write", params, &result); err != nil {
+	if err := s.backend.Call(route, "write", params, &result); err != nil {
 		return nil, err
 	}
-	return text(fmt.Sprintf("Wrote %d bytes to %s on %s.", result.BytesWritten, path, target)), nil
+	return text(fmt.Sprintf("Wrote %d bytes to %s on %s.", result.BytesWritten, path, route.Target)), nil
 }
 
 func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.EditResult
-	err = s.backend.Call(target, "edit", map[string]any{
+	err = s.backend.Call(route, "edit", map[string]any{
 		"path":        path,
 		"old":         oldString,
 		"new":         newString,
@@ -136,11 +136,11 @@ func (s *Server) editFile(args map[string]any) ([]contentBlock, error) {
 		return nil, err
 	}
 	replacements := max(result.Replacements, 1)
-	return text(fmt.Sprintf("Replaced %d occurrence(s) in %s on %s.", replacements, path, target)), nil
+	return text(fmt.Sprintf("Replaced %d occurrence(s) in %s on %s.", replacements, path, route.Target)), nil
 }
 
 func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var listing protocol.DirListing
-	if err := s.backend.Call(target, "ls", params, &listing); err != nil {
+	if err := s.backend.Call(route, "ls", params, &listing); err != nil {
 		return nil, err
 	}
 	return text(formatListing(&listing)), nil
@@ -186,7 +186,7 @@ type execReply struct {
 }
 
 func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var reply execReply
-	if err := s.backend.Call(target, "exec", map[string]any{"command": command}, &reply); err != nil {
+	if err := s.backend.Call(route, "exec", map[string]any{"command": command}, &reply); err != nil {
 		return nil, err
 	}
 	if reply.Entries != nil {
@@ -259,7 +259,7 @@ func shellQuote(s string) string {
 }
 
 func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.GlobResult
-	if err := s.backend.Call(target, "glob", params, &result); err != nil {
+	if err := s.backend.Call(route, "glob", params, &result); err != nil {
 		return nil, err
 	}
 	if len(result.Files) == 0 {
@@ -287,7 +287,7 @@ func (s *Server) glob(args map[string]any) ([]contentBlock, error) {
 }
 
 func (s *Server) grep(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func (s *Server) grep(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.GrepResult
-	if err := s.backend.Call(target, "grep", params, &result); err != nil {
+	if err := s.backend.Call(route, "grep", params, &result); err != nil {
 		return nil, err
 	}
 	return text(formatGrep(&result)), nil
@@ -346,7 +346,7 @@ func formatGrep(result *protocol.GrepResult) string {
 }
 
 func (s *Server) uploadFile(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -360,15 +360,15 @@ func (s *Server) uploadFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	err = s.backend.Call(target, "upload", map[string]any{"local_path": localPath, "remote_path": remotePath}, &result)
+	err = s.backend.Call(route, "upload", map[string]any{"local_path": localPath, "remote_path": remotePath}, &result)
 	if err != nil {
 		return nil, err
 	}
-	return text(fmt.Sprintf("Uploaded %d bytes to %s on %s.", result.BytesWritten, remotePath, target)), nil
+	return text(fmt.Sprintf("Uploaded %d bytes to %s on %s.", result.BytesWritten, remotePath, route.Target)), nil
 }
 
 func (s *Server) downloadFile(args map[string]any) ([]contentBlock, error) {
-	target, err := s.target(args)
+	route, err := s.route(args)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +382,7 @@ func (s *Server) downloadFile(args map[string]any) ([]contentBlock, error) {
 	}
 
 	var result protocol.WriteResult
-	err = s.backend.Call(target, "download", map[string]any{"remote_path": remotePath, "local_path": localPath}, &result)
+	err = s.backend.Call(route, "download", map[string]any{"remote_path": remotePath, "local_path": localPath}, &result)
 	if err != nil {
 		return nil, err
 	}

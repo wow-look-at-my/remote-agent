@@ -207,9 +207,11 @@ func Start(opts StartOptions) error {
 	// Write PID file
 	os.WriteFile(d.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 
-	// Remember the target this socket belongs to, so a later command can
-	// restart the daemon itself instead of erroring out. Kept on shutdown.
-	WriteTargetRecord(target, port)
+	// Remember the target this socket belongs to and how it was reached, so a
+	// later command can restart the daemon itself instead of erroring out --
+	// through the same control master, if that is how this one connected.
+	// Kept on shutdown.
+	WriteTargetRecord(TargetRecord{Target: target, Port: port, ControlPath: conn.ControlPath})
 
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
 	fmt.Fprintf(os.Stderr, "Ready.\n")
