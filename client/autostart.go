@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/wow-look-at-my/remote-agent/daemon"
 )
@@ -16,8 +17,9 @@ import (
 // target a fresh one is started for.
 var TargetOverride string
 
-// resolvedSocket is the socket of a daemon this process started; it wins over
-// discovery for the remainder of the process.
+// resolvedSocket is the socket of a daemon this process started for the
+// process-wide target; it wins over discovery for the remainder of the process.
+// Calls that name their own target never consult it -- see sendRequestFor.
 var resolvedSocket string
 
 // errNoDaemon marks the failures auto-start can repair: no socket at all, or a
@@ -49,16 +51,7 @@ func resolveTarget() (daemon.TargetRecord, error) {
 		explicit = os.Getenv("REMOTE_AGENT_TARGET")
 	}
 	if explicit != "" {
-		rec := daemon.TargetRecord{Target: explicit, Port: defaultPort}
-		// A record for this exact target carries the port it was reached on;
-		// REMOTE_AGENT_PORT overrides both.
-		if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(explicit)); err == nil && prev.Port != 0 {
-			rec.Port = prev.Port
-		}
-		if p, ok := portFromEnv(); ok {
-			rec.Port = p
-		}
-		return rec, nil
+		return recordFor(explicit), nil
 	}
 
 	recs := daemon.ListTargetRecords()
@@ -83,16 +76,62 @@ func resolveTarget() (daemon.TargetRecord, error) {
 
 const defaultPort = 22
 
+// DefaultTarget reports the target this process was pointed at, if any: the
+// --target flag, REMOTE_AGENT_TARGET, or the target recorded for a pinned
+// REMOTE_AGENT_SOCKET. Callers that route per request (the MCP server) use it
+// as the fallback for requests that name no target of their own; an empty
+// result means the request has to carry one.
+func DefaultTarget() string {
+	if TargetOverride != "" {
+		return TargetOverride
+	}
+	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
+		return t
+	}
+	if sock := os.Getenv("REMOTE_AGENT_SOCKET"); sock != "" {
+		if rec, err := daemon.TargetForSocket(sock); err == nil {
+			return rec.Target
+		}
+	}
+	return ""
+}
+
+// recordFor describes the daemon to start for a named target. A record for this
+// exact target carries the port it was last reached on; REMOTE_AGENT_PORT
+// overrides both.
+func recordFor(target string) daemon.TargetRecord {
+	rec := daemon.TargetRecord{Target: target, Port: defaultPort}
+	if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(target)); err == nil && prev.Port != 0 {
+		rec.Port = prev.Port
+	}
+	if p, ok := portFromEnv(); ok {
+		rec.Port = p
+	}
+	return rec
+}
+
+// startMu serializes auto-starts within this process. One MCP server can be
+// asked for several targets at once, and two `connect` processes racing for the
+// same socket leaves one of them dead on "address already in use".
+var startMu sync.Mutex
+
 // autoStartDaemon starts a daemon for rec in the background and waits for it to
 // accept connections, returning its socket path. It is what makes `connect` an
 // optimization rather than a prerequisite.
 func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
+	startMu.Lock()
+	defer startMu.Unlock()
+
 	self, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locate remote-agent binary: %w", err)
 	}
 	sockPath := daemon.SocketPath(rec.Target)
 	logPath := strings.TrimSuffix(sockPath, ".sock") + ".log"
+	if pingSocket(sockPath) {
+		// Another caller started it while this one waited for the lock.
+		return sockPath, nil
+	}
 
 	fmt.Fprintf(os.Stderr, "No daemon for %s; starting one (log: %s)...\n", rec.Target, logPath)
 	proc, err := startDaemonFunc(self, rec.Target, rec.Port, logPath)
@@ -102,9 +141,6 @@ func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	if err := awaitDaemon(sockPath, proc, logPath, daemonReadyWait); err != nil {
 		return "", fmt.Errorf("daemon for %s did not become ready: %w (see %s)", rec.Target, err, logPath)
 	}
-	// Pin it for the rest of this process, so a long-lived client (the MCP
-	// server) does not re-resolve a stale socket path on every later call.
-	resolvedSocket = sockPath
 	return sockPath, nil
 }
 

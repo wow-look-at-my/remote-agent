@@ -126,7 +126,7 @@ connect.
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
 | `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
-| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing the remote filesystem as tools. `server.go` is the protocol layer, `tools.go` the tool declarations and their daemon calls. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
+| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
 | `fswire/` | The mount's wire protocol: request/response types, length-prefixed framing with binary payloads, and portable open-flag translation. Standard library only, so both ends share it. |
 | `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
@@ -242,6 +242,16 @@ connect.
 - **Mount caching is deliberately short**: 1s for attributes and entries, and
   negative lookups are not cached at all, because a file a forwarded build
   command just created has to be visible to the next read.
+- **Every MCP tool call carries its own target** (`target` argument; `s.tool`
+  in `mcpserver/tools.go` adds it, `client.CallTarget` routes it). Selecting
+  the daemon from process state instead -- a pinned socket, `--target`, a lone
+  socket in TempDir -- made a client wired up without those fail every call
+  with "no daemon running", curable only by setting a daemon up by hand. A
+  named target goes straight to `daemon.SocketPath(target)`, starting a daemon
+  there if none answers, so one server serves several hosts and a daemon that
+  idles out mid-session comes back on the next call. `remote-agent mcp
+  [user@host]` sets a default; without one the argument is required, because
+  the alternative is routing a call to a host nobody named.
 - **--no-mount is the fallback path**, and only there does the launcher pass
   `--disallowedTools=Read,Write,Edit,NotebookEdit,Glob,Grep` (claude filters
   denied tools out of the advertised set, so the model never sees them) and
@@ -298,7 +308,9 @@ connect.
   that code as the process exit code (via the `osExit` test seam), so callers like
   Claude's Bash tool see real success/failure. `exec` no longer prints an
   `[exit N]` marker.
-- Socket selection: `findSocket` honors `client.SocketOverride`, a socket this
+- Socket selection, for requests that name **no** target (`client.Call`; a
+  request that names one bypasses all of this): `findSocket` honors
+  `client.SocketOverride`, a socket this
   process auto-started, then `REMOTE_AGENT_SOCKET`, `--target`
   (`client.TargetOverride`) and `REMOTE_AGENT_TARGET` (hashed via
   `daemon.SocketPath`), before falling back to globbing a single socket in
