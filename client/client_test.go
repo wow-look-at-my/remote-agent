@@ -346,7 +346,7 @@ func TestSendRequestStaleSocket(t *testing.T) {
 
 func TestConnectWithPort(t *testing.T) {
 	// This will fail at SSH connect but exercises the Connect function
-	err := Connect("user@host", 2222)
+	err := Connect("user@host", 2222, "")
 	assert.NotNil(t, err)
 }
 

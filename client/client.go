@@ -174,9 +174,13 @@ func (DaemonBackend) Call(target, action string, params map[string]any, out any)
 	return CallTarget(target, action, params, out)
 }
 
-// Connect starts the daemon with the given target and SSH port.
-func Connect(target string, port int) error {
-	return daemon.Start(target, port)
+// Connect starts the daemon for a target. controlPath, when set, is an
+// OpenSSH control-master socket the daemon must run its commands through.
+func Connect(target string, port int, controlPath string) error {
+	if controlPath == "" {
+		controlPath = os.Getenv("REMOTE_AGENT_CONTROL_PATH")
+	}
+	return daemon.Start(daemon.StartOptions{Target: target, Port: port, ControlPath: controlPath})
 }
 
 // Disconnect stops the daemon.

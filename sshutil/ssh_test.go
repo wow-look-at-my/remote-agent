@@ -392,7 +392,7 @@ func TestConnectInvalidHost(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	// Connect to an address that will be refused
-	_, err := Connect("127.0.0.1", 1, "user")
+	_, err := Connect(ConnectOptions{Host: "127.0.0.1", Port: 1, User: "user"})
 	assert.NotNil(t, err)
 
 }
@@ -407,7 +407,7 @@ func TestConnectDefaultPort(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	// Port 0 should default to 22 and fail (no server on 22)
-	_, err := Connect("127.0.0.1", 0, "user")
+	_, err := Connect(ConnectOptions{Host: "127.0.0.1", User: "user"})
 	assert.NotNil(t, err)
 
 }
@@ -436,17 +436,18 @@ func TestConnectSuccess(t *testing.T) {
 	keepAliveInterval = 50 * time.Millisecond
 	defer func() { keepAliveInterval = oldInterval }()
 
-	result, err := Connect(host, port, "testuser")
+	result, err := Connect(ConnectOptions{Host: host, Port: port, User: "testuser"})
 	require.Nil(t, err)
 
-	defer result.Client.Close()
+	defer result.Conn.Close()
 	assert.Equal(t, "testuser", result.User)
 	assert.Equal(t, host, result.Host)
 	assert.Equal(t, port, result.Port)
 	assert.NotEqual(t, "", result.Fingerprint)
+	assert.Empty(t, result.ControlPath, "a dialed connection rode no control master")
 
 	// Verify we can run commands through this connection
-	stdout, _, exitCode, err := RunCommand(result.Client, "echo pong")
+	stdout, _, exitCode, err := result.Conn.Run("echo pong")
 	require.Nil(t, err)
 	assert.False(t, exitCode != 0 || string(stdout) != "pong\n")
 
