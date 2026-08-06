@@ -3,6 +3,7 @@ package sshutil
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -23,6 +24,10 @@ type SSHConfig struct {
 	HostName string
 	User     string
 	Port     int
+	// ControlPath is the control-master socket configured for this host,
+	// already expanded: `ssh -G` resolves ~ and the %r/%h/%p tokens, so it is
+	// a path that can be dialed as-is. Empty when none is configured.
+	ControlPath string
 }
 
 // sshGCommand builds the `ssh -G <host>` command. It is a test seam so the
@@ -55,24 +60,102 @@ func ResolveSSHConfig(host string) *SSHConfig {
 			if p, err := strconv.Atoi(value); err == nil {
 				cfg.Port = p
 			}
+		case "controlpath":
+			// "none" is how ssh spells "no control socket for this host".
+			if !strings.EqualFold(value, "none") {
+				cfg.ControlPath = value
+			}
 		}
 	}
 	return cfg
 }
 
-// ConnResult holds the SSH client and metadata from a successful connection.
+// Conn is the transport commands run over: an SSH connection this process
+// dialed and authenticated, or an OpenSSH control master's socket. The daemon
+// holds one and does not care which it got.
+type Conn interface {
+	Run(command string) (stdout, stderr []byte, exitCode int, err error)
+	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+	// StartStream runs a command whose stdin and stdout stay open as a
+	// bidirectional byte stream, for the filesystem mount.
+	StartStream(command string) (io.ReadWriteCloser, error)
+	Close() error
+}
+
+// ConnResult holds the transport and metadata from a successful connection.
 type ConnResult struct {
-	Client      *ssh.Client
-	Fingerprint string // SHA256 fingerprint of the key used
+	Conn        Conn
+	Fingerprint string // SHA256 fingerprint of the key used; empty via a control master
 	User        string
 	Host        string
 	Port        int
+	// ControlPath names the control master this rode in on, empty when the
+	// connection was dialed directly.
+	ControlPath string
 }
 
-// Connect establishes an SSH connection using agent auth or key files.
-func Connect(host string, port int, user string) (*ConnResult, error) {
+// ConnectOptions describes how to reach a host.
+type ConnectOptions struct {
+	Host string
+	Port int
+	User string
+	// ControlPath is an OpenSSH control-master socket to run commands
+	// through instead of dialing and authenticating separately. Empty dials.
+	ControlPath string
+	// RequireControl makes an unusable ControlPath an error instead of a
+	// reason to dial: a caller that asked for a specific control socket gets
+	// that socket or a failure, never a silent second connection to the host.
+	RequireControl bool
+}
+
+// sshConn is the dialed-connection transport: an authenticated SSH client
+// plus the runner that keeps sessions pre-opened for it.
+type sshConn struct {
+	*CommandRunner
+	client *ssh.Client
+}
+
+func (c *sshConn) StartStream(command string) (io.ReadWriteCloser, error) {
+	return StartStream(c.client, command)
+}
+
+// Close drops the pre-opened sessions and closes the connection itself.
+func (c *sshConn) Close() error {
+	c.CommandRunner.Close()
+	return c.client.Close()
+}
+
+// Connect returns a transport for the host: the configured control master
+// when one is answering, otherwise a freshly dialed and authenticated SSH
+// connection.
+//
+// Riding an existing master is what makes remote-agent usable on hosts this
+// process cannot authenticate to on its own -- one-time passwords, hardware
+// keys, an agent held by another session -- because the master already did it.
+func Connect(opts ConnectOptions) (*ConnResult, error) {
+	host, port, user := opts.Host, opts.Port, opts.User
 	if port == 0 {
 		port = 22
+	}
+
+	if opts.ControlPath != "" {
+		conn, err := DialControlMaster(opts.ControlPath)
+		if err == nil {
+			return &ConnResult{
+				Conn:        conn,
+				User:        user,
+				Host:        host,
+				Port:        port,
+				ControlPath: opts.ControlPath,
+			}, nil
+		}
+		if opts.RequireControl {
+			return nil, fmt.Errorf("control master requested but unusable: %w", err)
+		}
+		// Auto-detected from ssh_config and not answering: dialing is the
+		// right move, but say so -- silently opening a second connection to a
+		// host the user expected to be shared is exactly what confuses them.
+		fmt.Fprintf(os.Stderr, "Control socket %s is not answering (%v); connecting directly instead.\n", opts.ControlPath, err)
 	}
 
 	authMethods, fingerprint, err := buildAuthMethods()
@@ -104,7 +187,7 @@ func Connect(host string, port int, user string) (*ConnResult, error) {
 	go keepAlive(client, keepAliveInterval)
 
 	return &ConnResult{
-		Client:      client,
+		Conn:        &sshConn{CommandRunner: NewCommandRunner(client), client: client},
 		Fingerprint: fingerprint,
 		User:        user,
 		Host:        host,

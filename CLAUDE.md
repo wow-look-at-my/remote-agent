@@ -130,7 +130,7 @@ connect.
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
 | `fswire/` | The mount's wire protocol: request/response types, length-prefixed framing with binary payloads, and portable open-flag translation. Standard library only, so both ends share it. |
 | `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
-| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. |
+| `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. `mux_unix.go` is the other transport: a client for OpenSSH's control-master protocol (`mux_other.go` refuses on non-unix). Both satisfy `Conn`. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
 
 ## Conventions
@@ -292,6 +292,22 @@ connect.
   still a one-shot exec on the remote. With a same-path mount the shim starts
   each command in claude's working directory (see above), so relative paths
   work; a `cd` inside one command still does not carry into the next.
+- **Commands ride an OpenSSH control master when one answers** on the
+  ControlPath `ssh -G` reports for the host, instead of dialing and
+  authenticating a second connection -- which is what makes a host behind a
+  one-time password or a touched hardware key usable at all. `sshutil.Conn` is
+  the seam (dialed client or control socket); `--control-path` /
+  `REMOTE_AGENT_CONTROL_PATH` makes a specific master mandatory, and an
+  auto-detected socket that does not answer prints why before falling back to
+  dialing. remote-agent never *starts* a master: creating one can need a
+  password, which a backgrounded daemon cannot ask for.
+  See docs/ssh/control-sockets.md for the protocol and how to test it live.
+- **`exec` parses the global flags itself** (`applyGlobalFlags` in
+  `cmd/root.go`). It sets `DisableFlagParsing` so `exec ls -la` reaches the
+  remote intact, and cobra then hands it the global flags unparsed: before this,
+  `remote-agent --target host exec ls` ignored the target (running on whatever
+  daemon socket discovery found -- silently the wrong host) and pasted
+  "--target host" into the remote command string.
 - Host-key verification has OpenSSH `accept-new` semantics (`sshutil/ssh.go`):
   an unknown host is trusted on first use and its key recorded in
   `~/.ssh/known_hosts`; a recorded host must present the same key or the

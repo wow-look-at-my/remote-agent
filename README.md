@@ -156,7 +156,7 @@ default for calls that omit one; without a default, every call must carry its ow
 
 | Command | Description |
 |---------|-------------|
-| `connect <user@host>` | Start the daemon and SSH session up front. Optional: any command starts one on demand. `--port` sets the SSH port (default 22). |
+| `connect <user@host>` | Start the daemon and SSH session up front. Optional: any command starts one on demand. `--port` sets the SSH port (default 22), `--control-path` an OpenSSH control master to run through. |
 | `claude [user@host]` | Launch Claude Code with its shell and its files on the remote. `--dir`, `--mount-at`, `--no-mount`, `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
 | `mount <mountpoint> [remote-path]` | Mount the remote filesystem locally. `--allow-other` shares it with other local users. |
 | `unmount <mountpoint>` | Detach a mount. |
@@ -212,6 +212,15 @@ Authentication uses your SSH agent and `~/.ssh` keys. Host keys follow OpenSSH
 `accept-new` semantics: the first connection to an unknown host is trusted and its
 key recorded in `~/.ssh/known_hosts`, and every later connection must match the
 recorded key. The fingerprint is printed on connect — verify it on first contact.
+
+**Control sockets.** If `~/.ssh/config` sets a `ControlPath` for the host and a
+master is listening on it, commands ride that connection instead — no second
+authentication, so hosts behind a one-time password or a hardware key work by
+opening the master yourself first (`ssh host true`). A stale socket falls back
+to dialing, and says so. `--control-path <socket>` (or
+`REMOTE_AGENT_CONTROL_PATH`) makes a specific master mandatory: the connect
+fails rather than quietly opening its own. See
+[docs/ssh/control-sockets.md](docs/ssh/control-sockets.md).
 
 There is **one daemon per target host** (the socket path is derived from the
 target), so multiple terminals targeting the same host share a connection. When

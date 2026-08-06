@@ -90,8 +90,22 @@ func PIDPath(target string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.pid", h[:6]))
 }
 
+// StartOptions configures a daemon.
+type StartOptions struct {
+	Target string // user@host, or a ~/.ssh/config Host alias
+	Port   int    // SSH port; 0 means the configured or default port
+	// ControlPath is an OpenSSH control-master socket to run commands
+	// through. Naming one here makes it mandatory: the daemon fails rather
+	// than quietly opening its own connection to the host. Left empty, the
+	// control socket ssh_config configures for the host is used when a master
+	// is answering on it.
+	ControlPath string
+}
+
 // Start connects to the remote, deploys the helper binary, and starts the daemon.
-func Start(target string, port int) error {
+func Start(opts StartOptions) error {
+	target, port := opts.Target, opts.Port
+
 	// Parse user@host
 	user, host, err := parseTarget(target)
 	if err != nil {
@@ -109,6 +123,9 @@ func Start(target string, port int) error {
 	// Resolve any ~/.ssh/config Host alias to its real hostname/user/port via
 	// `ssh -G`, so a bare alias like "myserver" connects to the configured host.
 	// Only fill in values the caller did not supply explicitly.
+	// A control path named by the caller is a requirement, not a hint: the
+	// point of asking for one is not opening a second connection to the host.
+	controlPath, requireControl := opts.ControlPath, opts.ControlPath != ""
 	if cfg := sshutil.ResolveSSHConfig(host); cfg != nil {
 		if cfg.HostName != "" {
 			host = cfg.HostName
@@ -119,26 +136,36 @@ func Start(target string, port int) error {
 		if cfg.Port != 0 && port == 22 { // only override the default port
 			port = cfg.Port
 		}
+		if controlPath == "" {
+			controlPath = cfg.ControlPath
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Connecting to %s@%s:%d...\n", user, host, port)
 
-	// SSH connect
-	conn, err := sshutil.Connect(host, port, user)
+	conn, err := sshutil.Connect(sshutil.ConnectOptions{
+		Host:           host,
+		Port:           port,
+		User:           user,
+		ControlPath:    controlPath,
+		RequireControl: requireControl,
+	})
 	if err != nil {
 		return fmt.Errorf("ssh connect: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Connected. Key fingerprint: %s\n", conn.Fingerprint)
+	if conn.ControlPath != "" {
+		fmt.Fprintf(os.Stderr, "Connected through control master at %s (it owns the connection and checked the host key).\n", conn.ControlPath)
+	} else {
+		fmt.Fprintf(os.Stderr, "Connected. Key fingerprint: %s\n", conn.Fingerprint)
+	}
 
-	// The runner keeps spare SSH sessions pre-opened so each command skips
-	// the channel-open round trip.
-	runner := sshutil.NewCommandRunner(conn.Client)
+	runner := conn.Conn
 
 	// Deploy helper binary (or reuse the cached copy from a previous connect)
 	remotePath, cached, err := deployBinary(runner)
 	if err != nil {
-		conn.Client.Close()
+		conn.Conn.Close()
 		return fmt.Errorf("deploy: %w", err)
 	}
 
@@ -149,8 +176,11 @@ func Start(target string, port int) error {
 	}
 
 	// Run startup audit
-	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s",
-		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint))
+	// Through a control master there is no key of ours to name, so the audit
+	// entry records which master vouched for the connection instead of
+	// leaving the field blank and implying an unauthenticated one.
+	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s --detail %s",
+		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
 	runner.Run(auditCmd)
 
 	d := &Daemon{
@@ -309,8 +339,17 @@ func (d *Daemon) cleanup() {
 		d.listener.Close()
 	}
 	if d.conn != nil {
-		d.conn.Client.Close()
+		d.conn.Conn.Close()
 	}
+}
+
+// connectionDetail describes how the daemon reached the host, for the audit
+// log: which control master it rode, or that it dialed the host itself.
+func connectionDetail(conn *sshutil.ConnResult) string {
+	if conn.ControlPath != "" {
+		return "connected via control master " + conn.ControlPath
+	}
+	return "connected directly over ssh"
 }
 
 // deployBinary ships the helper binary to the remote and returns its path.

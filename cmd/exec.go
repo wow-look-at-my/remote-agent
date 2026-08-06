@@ -17,11 +17,14 @@ var execCmd = &cobra.Command{
 	Short:              "Run shell command on remote",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// With flag parsing disabled cobra does not consume a leading "--"
-		// separator, and it must not become part of the remote command string
-		// (`sh -c '-- cmd'` is an error on every shell). Drop it.
-		if len(args) > 0 && args[0] == "--" {
-			args = args[1:]
+		// Flag parsing is off so that `exec ls -la` passes -la to the remote
+		// rather than erroring on an unknown flag. The cost is that cobra
+		// hands over the global flags unparsed too, and a "--" separator it
+		// would normally have consumed -- neither belongs in the remote
+		// command string (`sh -c '-- cmd'` errors on every shell).
+		args, err := applyGlobalFlags(args)
+		if err != nil {
+			return err
 		}
 		if len(args) == 0 {
 			return fmt.Errorf("usage: remote-agent exec <command>")

@@ -10,7 +10,6 @@ import (
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
 	"github.com/wow-look-at-my/remote-agent/remotefs"
-	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
 
 // mountRegistry tracks the filesystem mounts this daemon owns, keyed by their
@@ -118,7 +117,7 @@ func (d *Daemon) startStream(command string) (mountStream, error) {
 	if d.conn == nil {
 		return nil, fmt.Errorf("no SSH connection")
 	}
-	return sshutil.StartStream(d.conn.Client, command)
+	return d.conn.Conn.StartStream(command)
 }
 
 func (d *Daemon) handleUnmountAction(params map[string]any) *protocol.DaemonResponse {
