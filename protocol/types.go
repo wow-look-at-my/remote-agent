@@ -6,6 +6,18 @@ type DaemonRequest struct {
 	Params map[string]any `json:"params,omitempty"`
 }
 
+// Route says which host an action runs on and how to reach it. It travels
+// with a call rather than being process state, because one client -- the MCP
+// server -- serves several hosts at once and is handed a control socket as an
+// argument, not as configuration it could have been started with.
+type Route struct {
+	// Target is the SSH target: user@host, or a ~/.ssh/config Host alias.
+	Target string `json:"target"`
+	// ControlPath is an OpenSSH control-master socket to run through. Naming
+	// one makes it mandatory: the daemon uses that master or fails.
+	ControlPath string `json:"control_path,omitempty"`
+}
+
 // DaemonResponse is sent from the daemon back to the CLI.
 type DaemonResponse struct {
 	OK    bool   `json:"ok"`

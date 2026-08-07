@@ -57,18 +57,21 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 // bypassed entirely: a caller that names its target (every MCP tool call does)
 // must reach that host and no other, whatever else this process has been
 // pointed at.
-func sendRequestFor(target string, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
-	if target == "" {
+func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
+	if route.Target == "" {
 		return sendRequest(req)
 	}
-	resp, err := sendRequestTo(daemon.SocketPath(target), req)
+	if err := checkControlPath(route); err != nil {
+		return nil, err
+	}
+	resp, err := sendRequestTo(daemon.SocketPath(route.Target), req)
 	if err == nil || !errors.Is(err, errNoDaemon) {
 		return resp, err
 	}
 	if !autoStartEnabled(req.Action) {
 		return nil, err
 	}
-	sockPath, startErr := autoStartDaemon(recordFor(target))
+	sockPath, startErr := autoStartDaemon(recordFor(route))
 	if startErr != nil {
 		return nil, startErr
 	}
@@ -137,13 +140,19 @@ func findSocket() (string, error) {
 // counterpart to the printing helpers below: the MCP server needs the
 // structured result, not text on stdout.
 func Call(action string, params map[string]any, out any) error {
-	return CallTarget("", action, params, out)
+	return CallRoute(protocol.Route{}, action, params, out)
 }
 
 // CallTarget is Call against a named SSH target, starting a daemon for that
 // target when none is running. An empty target falls back to Call's discovery.
 func CallTarget(target, action string, params map[string]any, out any) error {
-	resp, err := sendRequestFor(target, &protocol.DaemonRequest{Action: action, Params: params})
+	return CallRoute(protocol.Route{Target: target}, action, params, out)
+}
+
+// CallRoute is Call against a named target reached a named way -- through a
+// control master, when the route says so.
+func CallRoute(route protocol.Route, action string, params map[string]any, out any) error {
+	resp, err := sendRequestFor(route, &protocol.DaemonRequest{Action: action, Params: params})
 	if err != nil {
 		return err
 	}
@@ -170,17 +179,18 @@ func CallTarget(target, action string, params map[string]any, out any) error {
 type DaemonBackend struct{}
 
 // Call implements the MCP server's Backend interface.
-func (DaemonBackend) Call(target, action string, params map[string]any, out any) error {
-	return CallTarget(target, action, params, out)
+func (DaemonBackend) Call(route protocol.Route, action string, params map[string]any, out any) error {
+	return CallRoute(route, action, params, out)
 }
 
 // Connect starts the daemon for a target. controlPath, when set, is an
 // OpenSSH control-master socket the daemon must run its commands through.
 func Connect(target string, port int, controlPath string) error {
-	if controlPath == "" {
-		controlPath = os.Getenv("REMOTE_AGENT_CONTROL_PATH")
-	}
-	return daemon.Start(daemon.StartOptions{Target: target, Port: port, ControlPath: controlPath})
+	return daemon.Start(daemon.StartOptions{
+		Target:      target,
+		Port:        port,
+		ControlPath: ControlPathFor(protocol.Route{ControlPath: controlPath}),
+	})
 }
 
 // Disconnect stops the daemon.

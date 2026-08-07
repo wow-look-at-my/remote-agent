@@ -14,7 +14,7 @@ import (
 // call runs one tool through a server wired to backend.
 func call(t *testing.T, backend Backend, name string, args map[string]any) ([]contentBlock, error) {
 	t.Helper()
-	s := New(backend, "test", testTarget)
+	s := New(backend, "test", testTarget, "")
 	tool := s.lookup(name)
 	require.NotNil(t, tool, "tool %s should exist", name)
 	return tool.handler(args)
@@ -353,7 +353,7 @@ func TestToolCallUsesDefaultTarget(t *testing.T) {
 	backend.results["read"] = protocol.FileInfo{Content: "x\n"}
 
 	callText(t, backend, "read_file", map[string]any{"path": "/srv/f"})
-	assert.Equal(t, testTarget, backend.lastCall(t).Target)
+	assert.Equal(t, testTarget, backend.lastCall(t).Route.Target)
 }
 
 func TestToolCallTargetArgumentWins(t *testing.T) {
@@ -361,7 +361,7 @@ func TestToolCallTargetArgumentWins(t *testing.T) {
 	backend.results["read"] = protocol.FileInfo{Content: "x\n"}
 
 	callText(t, backend, "read_file", map[string]any{"path": "/srv/f", "target": "root@other"})
-	assert.Equal(t, "root@other", backend.lastCall(t).Target)
+	assert.Equal(t, "root@other", backend.lastCall(t).Route.Target)
 }
 
 // Every tool routes by target, not just the one that gets exercised most.
@@ -382,7 +382,7 @@ func TestEveryToolPassesItsTarget(t *testing.T) {
 			toolArgs["target"] = "root@" + name
 			_, err := call(t, backend, name, toolArgs)
 			require.NoError(t, err)
-			assert.Equal(t, "root@"+name, backend.lastCall(t).Target)
+			assert.Equal(t, "root@"+name, backend.lastCall(t).Route.Target)
 		})
 	}
 }
@@ -391,7 +391,7 @@ func TestEveryToolPassesItsTarget(t *testing.T) {
 // saying so rather than reaching for whatever daemon happens to be running.
 func TestToolCallWithoutTargetOrDefault(t *testing.T) {
 	backend := newFakeBackend()
-	s := New(backend, "test", "")
+	s := New(backend, "test", "", "")
 
 	_, err := s.lookup("read_file").handler(map[string]any{"path": "/srv/f"})
 	require.Error(t, err)
@@ -400,12 +400,12 @@ func TestToolCallWithoutTargetOrDefault(t *testing.T) {
 }
 
 func TestTargetIsRequiredOnlyWithoutADefault(t *testing.T) {
-	for _, tool := range New(newFakeBackend(), "test", "").tools {
+	for _, tool := range New(newFakeBackend(), "test", "", "").tools {
 		schema := tool.InputSchema
 		assert.Contains(t, schema["properties"].(map[string]any), "target", "%s needs a target argument", tool.Name)
 		assert.Contains(t, schema["required"].([]string), "target", "%s must require target", tool.Name)
 	}
-	for _, tool := range New(newFakeBackend(), "test", testTarget).tools {
+	for _, tool := range New(newFakeBackend(), "test", testTarget, "").tools {
 		schema := tool.InputSchema
 		desc := schema["properties"].(map[string]any)["target"].(map[string]any)["description"].(string)
 		assert.Contains(t, desc, testTarget, "%s should document the default target", tool.Name)

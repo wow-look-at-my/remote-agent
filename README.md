@@ -119,9 +119,10 @@ remote-agent claude user@host --no-mount            # no FUSE: use MCP tools ins
 The mount point defaults to the *same absolute path* as the remote directory, so
 a path means the same thing to a file tool (local, through the mount) and to a
 shell command (remote, over SSH). Where FUSE is unavailable, `--no-mount` falls
-back to serving the remote filesystem as MCP tools (`read_file`, `write_file`,
-`edit_file`, `list_dir`, `glob`, `grep`, `upload_file`, `download_file`) and
-disabling the built-ins — that mode only covers the tools remote-agent provides.
+back to serving the remote host as MCP tools (`run_command`, `read_file`,
+`write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `upload_file`,
+`download_file`) and disabling the built-in file tools — that mode only covers
+the tools remote-agent provides.
 
 > Note: each Bash call runs as a one-shot command on the remote. With a mount at
 > the matching path, commands start in Claude's working directory, so relative
@@ -136,11 +137,12 @@ the cwd-tracking tail — stripped), while hooks and MCP servers run on the
 local machine, where the scripts and environment variables Claude prepared
 for them actually exist.
 
-### Serve remote files to any MCP client
+### Serve a remote host to any MCP client
 
-`remote-agent mcp` exposes the same toolset (`read_file`, `write_file`,
-`edit_file`, `list_dir`, `glob`, `grep`, `upload_file`, `download_file`) over the
-MCP stdio transport, to Claude Code or any other client.
+`remote-agent mcp` exposes the remote host's shell and files (`run_command`,
+`read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`,
+`upload_file`, `download_file`) over the MCP stdio transport, to Claude Code or
+any other client.
 
 ```json
 { "mcpServers": { "remote": { "command": "remote-agent", "args": ["mcp"] } } }
@@ -151,6 +153,22 @@ Every tool takes the `target` it acts on (`user@host`, or a `Host` alias from
 started first, and one server can act on several hosts at once. Naming a target
 (`args: ["mcp", "user@host"]`, `--target`, or `REMOTE_AGENT_TARGET`) makes it the
 default for calls that omit one; without a default, every call must carry its own.
+
+**Given a control socket for a host, pass it as `control_path`** — every tool
+takes it, alongside `target`:
+
+```json
+{"name": "run_command",
+ "arguments": {"target": "root@10.0.0.7",
+               "control_path": "/tmp/cm-root@10.0.0.7:22",
+               "command": "systemctl status nginx"}}
+```
+
+The call borrows the connection that master already authenticated, which is
+what makes a host behind a one-time password or a hardware key reachable at
+all. Naming one makes it mandatory — the call fails rather than opening its
+own connection. Omit it when `~/.ssh/config` already sets a `ControlPath` for
+the host (used automatically) or when the host needs no master.
 
 ### Commands
 
@@ -170,7 +188,7 @@ default for calls that omit one; without a default, every call must carry its ow
 | `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`; the text must be unique unless `--replace-all`. |
 | `glob <pattern> [path]` | List remote files matching a glob (`**`, braces), newest first. `--limit` caps results. |
 | `grep <pattern> [path]` | Search remote file contents by regex. `--include`, `--mode`, `-i`, `-C`, `--limit`. |
-| `mcp [user@host]` | Serve remote filesystems to an MCP client over stdio (used by `claude`, usable by any MCP client). Every tool takes the target it acts on; a target given here is the default. |
+| `mcp [user@host]` | Serve remote shells and filesystems to an MCP client over stdio (used by `claude`, usable by any MCP client). Every tool takes the target it acts on; a target given here is the default. |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
 | `upload <local> <remote>` | Copy a local file to the remote. |

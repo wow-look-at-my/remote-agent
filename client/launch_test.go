@@ -234,7 +234,7 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	defer func() { runClaudeFunc = runClaudeProcess }()
 
 	// startDaemonFunc must NOT be called when a daemon already exists.
-	startDaemonFunc = func(self, tgt string, port int, logPath string) (*os.Process, error) {
+	startDaemonFunc = func(self string, rec daemon.TargetRecord, logPath string) (*os.Process, error) {
 		t.Fatalf("startDaemonFunc should not be called for an existing daemon")
 		return nil, nil
 	}
@@ -284,7 +284,7 @@ func TestLaunchClaudeStartsAndStopsDaemon(t *testing.T) {
 
 	var cleanup func()
 	started := false
-	startDaemonFunc = func(self, tgt string, port int, logPath string) (*os.Process, error) {
+	startDaemonFunc = func(self string, rec daemon.TargetRecord, logPath string) (*os.Process, error) {
 		started = true
 		cleanup = startPongDaemon(t, sockPath) // simulate the daemon coming up
 		return nil, nil
@@ -325,10 +325,29 @@ func TestLaunchClaudeNoTargetNoDaemon(t *testing.T) {
 func TestStartDaemonProcess(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "daemon.log")
-	proc, err := startDaemonProcess("/bin/true", "root@host", 22, logPath)
+	proc, err := startDaemonProcess("/bin/true", daemon.TargetRecord{Target: "root@host", Port: 22}, logPath)
 	require.NoError(t, err)
 	require.NotNil(t, proc)
 	_, _ = os.Stat(logPath) // log file created
+}
+
+// A daemon started for a route with a control master must be told about it:
+// the child process is where the connection is actually made.
+func TestStartDaemonProcessPassesControlPath(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "daemon.log")
+	self := filepath.Join(dir, "echo-args")
+	require.NoError(t, os.WriteFile(self, []byte("#!/bin/sh\necho \"$@\"\n"), 0755))
+
+	proc, err := startDaemonProcess(self, daemon.TargetRecord{
+		Target: "root@host", Port: 22, ControlPath: "/tmp/cm.sock",
+	}, logPath)
+	require.NoError(t, err)
+	_, _ = proc.Wait()
+
+	logged, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(logged), "--control-path /tmp/cm.sock")
 }
 
 func TestRunClaudeProcess(t *testing.T) {

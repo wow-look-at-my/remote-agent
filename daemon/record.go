@@ -15,6 +15,10 @@ import (
 type TargetRecord struct {
 	Target string `json:"target"`
 	Port   int    `json:"port"`
+	// ControlPath is the control-master socket the daemon ran through, empty
+	// when it dialed the host itself. A restart reuses it, and a client that
+	// asks for a different one can see that this daemon is not it.
+	ControlPath string `json:"control_path,omitempty"`
 }
 
 // TargetPath returns the target-record path for a given target.
@@ -26,12 +30,12 @@ func TargetPath(target string) string {
 // WriteTargetRecord records the target a daemon was started for. The record
 // deliberately outlives the daemon: it is what lets the next command restart a
 // daemon that idled out or died.
-func WriteTargetRecord(target string, port int) error {
-	data, err := json.Marshal(TargetRecord{Target: target, Port: port})
+func WriteTargetRecord(rec TargetRecord) error {
+	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(TargetPath(target), data, 0600)
+	return os.WriteFile(TargetPath(rec.Target), data, 0600)
 }
 
 // ReadTargetRecord loads one record file.

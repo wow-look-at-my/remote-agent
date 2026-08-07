@@ -126,7 +126,7 @@ connect.
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
 | `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
-| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
+| `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote shells and filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
 | `fswire/` | The mount's wire protocol: request/response types, length-prefixed framing with binary payloads, and portable open-flag translation. Standard library only, so both ends share it. |
 | `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
@@ -148,6 +148,15 @@ connect.
   `shellEscape` (`daemon/daemon.go`).
 - **Errors** wrap with `%w`; handlers return `errResponse(err)` / `okResponse(data)`
   (`daemon/handler.go`).
+- **Every capability has to be reachable per call, from the MCP tools.** A
+  model is handed a host, a control socket, a directory *mid-session* and
+  cannot restart its own MCP server, so a capability that exists only as a
+  flag or environment variable the server was started with does not exist for
+  it. Anything the daemon can do gets a tool argument (routing on every tool
+  via `s.tool`, or an argument on the tool it belongs to) — not a setup step
+  in a README. This shipped as three separate fixes (`target`, `run_command`,
+  `control_path`) that were all this same defect; check it before adding a
+  capability, not after someone reports being stuck.
 
 ## Gotchas
 
@@ -242,6 +251,23 @@ connect.
 - **Mount caching is deliberately short**: 1s for attributes and entries, and
   negative lookups are not cached at all, because a file a forwarded build
   command just created has to be visible to the next read.
+- **`run_command` is the MCP server's shell** (`mcpserver/handlers.go`). It
+  reaches the daemon's `exec`, so it inherits the `ls` rewrite: a plain
+  `ls <path>` comes back as a `DirListing`, not an `ExecResult`, and `execReply`
+  decodes both -- reading only the command shape turned `ls /srv` into an empty
+  success. A non-zero exit is returned as a tool error carrying the output, each
+  stream is capped at 64 KiB with the drop stated, and `cwd` is prefixed as a
+  shell-quoted `cd` because each call is a fresh one-shot shell.
+- **A control socket is named per call too**: `control_path` on every MCP tool,
+  `--control-path` (global flag) and `REMOTE_AGENT_CONTROL_PATH` for the CLI
+  and the launcher, resolved by `client.ControlPathFor` in that order. It
+  rides `protocol.Route` with the target into `client.CallRoute`, which starts
+  that target's daemon through that master. Naming one makes it **mandatory**
+  (the daemon fails rather than dialing its own connection), the daemon's
+  target record remembers it so a restart reuses it, and a call naming a
+  *different* socket than the running daemon uses is refused rather than
+  silently answered over the wrong connection (`checkControlPath`).
+  docs/ssh/control-sockets.md has the worked examples.
 - **Every MCP tool call carries its own target** (`target` argument; `s.tool`
   in `mcpserver/tools.go` adds it, `client.CallTarget` routes it). Selecting
   the daemon from process state instead -- a pinned socket, `--target`, a lone
@@ -343,7 +369,10 @@ connect.
 3. A `handle<Name>` handler in `daemon/ops.go`, wired into the switch in
    `daemon/handler.go`.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
-5. If the model should be able to use it through `remote-agent claude
-   --no-mount`, add a tool for it in `mcpserver/tools.go` (declaration +
-   handler calling `s.backend.Call`). A mounted session needs nothing: the
-   model reaches files with its ordinary tools.
+5. Add a tool for it in `mcpserver/tools.go` (declaration) plus its handler in
+   `mcpserver/handlers.go` (`s.route(args)`, then `s.backend.Call(route, ...)`)
+   — that is how the model reaches it through `remote-agent mcp` in any client,
+   and through `remote-agent claude --no-mount`. Anything the command needs to
+   be told is an argument on the tool, per the per-call rule in Conventions. A
+   mounted claude session needs nothing extra for *file* access: the model
+   reaches files with its ordinary tools through the mount.

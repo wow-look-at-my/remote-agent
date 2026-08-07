@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -10,12 +11,17 @@ import (
 	"sync"
 
 	"github.com/wow-look-at-my/remote-agent/daemon"
+	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
 // TargetOverride, when set, names the SSH target commands act on (the --target
 // flag). It selects the daemon socket and, when no daemon is running, is the
 // target a fresh one is started for.
 var TargetOverride string
+
+// ControlPathOverride, when set, is the OpenSSH control-master socket a daemon
+// this process starts must run through (the --control-path flag).
+var ControlPathOverride string
 
 // resolvedSocket is the socket of a daemon this process started for the
 // process-wide target; it wins over discovery for the remainder of the process.
@@ -51,7 +57,7 @@ func resolveTarget() (daemon.TargetRecord, error) {
 		explicit = os.Getenv("REMOTE_AGENT_TARGET")
 	}
 	if explicit != "" {
-		return recordFor(explicit), nil
+		return recordFor(protocol.Route{Target: explicit}), nil
 	}
 
 	recs := daemon.ListTargetRecords()
@@ -59,11 +65,7 @@ func resolveTarget() (daemon.TargetRecord, error) {
 	case 0:
 		return daemon.TargetRecord{}, errors.New("no target known: pass --target user@host or set REMOTE_AGENT_TARGET")
 	case 1:
-		rec := recs[0]
-		if rec.Port == 0 {
-			rec.Port = defaultPort
-		}
-		return rec, nil
+		return recordFor(protocol.Route{Target: recs[0].Target}), nil
 	default:
 		names := make([]string, 0, len(recs))
 		for _, r := range recs {
@@ -96,18 +98,71 @@ func DefaultTarget() string {
 	return ""
 }
 
-// recordFor describes the daemon to start for a named target. A record for this
-// exact target carries the port it was last reached on; REMOTE_AGENT_PORT
-// overrides both.
-func recordFor(target string) daemon.TargetRecord {
-	rec := daemon.TargetRecord{Target: target, Port: defaultPort}
-	if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(target)); err == nil && prev.Port != 0 {
-		rec.Port = prev.Port
+// recordFor describes the daemon to start for a route. A record for this exact
+// target carries the port it was last reached on and the control master it
+// rode, if any; REMOTE_AGENT_PORT and the route's own control path win.
+func recordFor(route protocol.Route) daemon.TargetRecord {
+	rec := daemon.TargetRecord{Target: route.Target, Port: defaultPort}
+	if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(route.Target)); err == nil {
+		if prev.Port != 0 {
+			rec.Port = prev.Port
+		}
+		rec.ControlPath = prev.ControlPath
 	}
 	if p, ok := portFromEnv(); ok {
 		rec.Port = p
 	}
+	if cp := ControlPathFor(route); cp != "" {
+		rec.ControlPath = cp
+	}
 	return rec
+}
+
+// ControlPathFor resolves the control-master socket a route should use: the
+// one the call named, else the process-wide --control-path flag, else
+// REMOTE_AGENT_CONTROL_PATH. Empty means "whatever ssh_config configures for
+// the host", which the daemon resolves and treats as optional.
+func ControlPathFor(route protocol.Route) string {
+	if route.ControlPath != "" {
+		return route.ControlPath
+	}
+	if ControlPathOverride != "" {
+		return ControlPathOverride
+	}
+	return os.Getenv("REMOTE_AGENT_CONTROL_PATH")
+}
+
+// checkControlPath refuses to run a call through a daemon that is not using
+// the control master the caller asked for. The daemon is shared and long-lived,
+// so a second caller naming a different one cannot change it -- and silently
+// running on the wrong connection is exactly what naming it was meant to stop.
+func checkControlPath(route protocol.Route) error {
+	want := ControlPathFor(route)
+	if want == "" {
+		return nil
+	}
+	prev, err := daemon.ReadTargetRecord(daemon.TargetPath(route.Target))
+	if err != nil || prev.ControlPath == want || !socketAnswers(daemon.SocketPath(route.Target)) {
+		return nil
+	}
+	via := "no control master"
+	if prev.ControlPath != "" {
+		via = "control master " + prev.ControlPath
+	}
+	return fmt.Errorf("a daemon for %s is already running through %s, not %s; stop it first with `remote-agent disconnect --target %s`",
+		route.Target, via, want, route.Target)
+}
+
+// socketAnswers reports whether anything is listening on a daemon socket. It
+// only connects: a request would run a command on the remote, which is far too
+// much work for a liveness question asked before every routed call.
+func socketAnswers(sockPath string) bool {
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // startMu serializes auto-starts within this process. One MCP server can be
@@ -134,7 +189,7 @@ func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	}
 
 	fmt.Fprintf(os.Stderr, "No daemon for %s; starting one (log: %s)...\n", rec.Target, logPath)
-	proc, err := startDaemonFunc(self, rec.Target, rec.Port, logPath)
+	proc, err := startDaemonFunc(self, rec, logPath)
 	if err != nil {
 		return "", fmt.Errorf("start daemon for %s: %w", rec.Target, err)
 	}
