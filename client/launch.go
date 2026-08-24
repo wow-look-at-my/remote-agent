@@ -195,9 +195,12 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 			return "", "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", terr)
 		}
 		opts.Target = rec.Target
-		if opts.Port == 0 {
-			opts.Port = rec.Port
-		}
+	}
+
+	// The port is part of the target the daemon is keyed on, so --port folds
+	// into it here rather than travelling beside it.
+	if opts.Target, err = targetKey(opts.Target, opts.Port); err != nil {
+		return "", "", false, err
 	}
 
 	sockPath = daemon.SocketPath(opts.Target)
@@ -206,11 +209,17 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 		return sockPath, opts.Target, false, nil
 	}
 
+	rec, err := recordFor(protocol.Route{Target: opts.Target, ControlPath: opts.ControlPath})
+	if err != nil {
+		return "", "", false, err
+	}
+	// The record names the target the daemon starts for, and the socket has to
+	// be the one that target opens.
+	sockPath = daemon.SocketPath(rec.Target)
+
 	logPath := filepath.Join(tmpDir(opts.ShimDir), "remote-agent-claude-daemon.log")
-	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", opts.Target, logPath)
-	proc, err := startDaemonFunc(self, recordFor(protocol.Route{
-		Target: opts.Target, ControlPath: opts.ControlPath,
-	}), logPath)
+	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", rec.Target, logPath)
+	proc, err := startDaemonFunc(self, rec, logPath)
 	if err != nil {
 		return "", "", false, fmt.Errorf("start daemon: %w", err)
 	}
@@ -218,7 +227,7 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 		return "", "", false, fmt.Errorf("daemon did not become ready: %w (see %s)", err, logPath)
 	}
 	fmt.Fprintf(os.Stderr, "Daemon ready.\n")
-	return sockPath, opts.Target, true, nil
+	return sockPath, rec.Target, true, nil
 }
 
 // remoteToolArgs returns the claude flags that swap the built-in local file

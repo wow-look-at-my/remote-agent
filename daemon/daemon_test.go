@@ -26,6 +26,31 @@ func TestSocketPath(t *testing.T) {
 
 }
 
+// Several endpoints behind one user@host, on different ports, are the whole
+// reason the port is part of the key.
+func TestSocketPathSeparatesPorts(t *testing.T) {
+	bare := SocketPath("root@127.0.0.1")
+	first := SocketPath("root@127.0.0.1:2201")
+	second := SocketPath("root@127.0.0.1:2202")
+
+	assert.NotEqual(t, first, second, "two ports on one host must not share a daemon socket")
+	assert.NotEqual(t, bare, first)
+	assert.NotEqual(t, bare, second)
+
+	// The same holds for the PID file and the target record beside the socket.
+	assert.NotEqual(t, PIDPath("root@127.0.0.1:2201"), PIDPath("root@127.0.0.1:2202"))
+	assert.NotEqual(t, TargetPath("root@127.0.0.1:2201"), TargetPath("root@127.0.0.1:2202"))
+}
+
+// Every spelling of one endpoint keys on the same socket, whichever way the
+// port arrived.
+func TestSocketPathCanonicalizes(t *testing.T) {
+	merged, err := CanonicalTarget("root@127.0.0.1", 2201)
+	require.NoError(t, err)
+	assert.Equal(t, SocketPath("root@127.0.0.1:2201"), SocketPath(merged))
+	assert.Equal(t, SocketPath("root@[::1]:2201"), SocketPath(" root@[::1]:2201 "))
+}
+
 func TestPIDPath(t *testing.T) {
 	path := PIDPath("user@host.example.com")
 	assert.NotEqual(t, "", path)
@@ -39,6 +64,17 @@ func TestSocketAndPIDPathDiffer(t *testing.T) {
 
 }
 
+// Start refuses a target and a --port that name two different endpoints. It
+// fails before it dials, so the test needs no SSH host.
+func TestStartRejectsConflictingPorts(t *testing.T) {
+	err := Start(StartOptions{Target: "root@127.0.0.1:2201", Port: 2202})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2202")
+
+	err = Start(StartOptions{Target: "root@127.0.0.1:bad"})
+	assert.ErrorContains(t, err, "bad port")
+}
+
 func TestParseTarget(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -50,20 +86,20 @@ func TestParseTarget(t *testing.T) {
 		{"deploy@my-host", "deploy", "my-host"},
 	}
 	for _, tt := range tests {
-		user, host, err := parseTarget(tt.input)
+		ep, err := ParseTarget(tt.input)
 		assert.Nil(t, err)
-		assert.Equal(t, tt.wantUser, user)
-		assert.Equal(t, tt.wantHost, host)
-
+		assert.Equal(t, tt.wantUser, ep.User)
+		assert.Equal(t, tt.wantHost, ep.Host)
+		assert.Equal(t, 0, ep.Port)
 	}
 }
 
 func TestParseTargetNoUser(t *testing.T) {
-	user, host, err := parseTarget("server.com")
+	ep, err := ParseTarget("server.com")
 	require.Nil(t, err)
-	assert.Equal(t, "server.com", host)
-	assert.NotEqual(t, "", user)
-
+	assert.Equal(t, "server.com", ep.Host)
+	assert.Equal(t, "", ep.User)
+	assert.NotEqual(t, "", ep.Login())
 }
 
 func TestShellEscape(t *testing.T) {

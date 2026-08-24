@@ -8,7 +8,7 @@ import (
 )
 
 var claudeCmd = &cobra.Command{
-	Use:   "claude [user@host] [-- claude-args...]",
+	Use:   "claude [user@host[:port]] [-- claude-args...]",
 	Short: "Launch Claude Code with its shell wired to run on the remote host",
 	Long: `Launch Claude Code so that every Bash tool command and every file operation
 it performs executes on a remote host through the remote-agent daemon, instead
@@ -29,7 +29,9 @@ Pass --dir to choose the remote directory, --mount-at to put the mount
 somewhere else locally, or --no-mount where FUSE is unavailable (then only
 remote-agent's own MCP tools reach the remote).
 
-The optional positional argument is the SSH target (user@host). If omitted, a
+The optional positional argument is the SSH target (user@host, or
+user@host:2222 for a non-standard SSH port -- each port gets its own daemon).
+If omitted, a
 running daemon is reused -- and if none is running, a daemon is started for the
 target of the last one that did. Anything after "--" is passed straight
 through to claude. A daemon started by this command is stopped again when claude
@@ -37,6 +39,7 @@ exits (use --keep-daemon to leave it running).
 
 Examples:
   remote-agent claude root@build-box
+  remote-agent claude root@build-box:2222        # non-standard SSH port
   remote-agent claude root@build-box --port 2222 -- --model opus
   remote-agent claude                       # reuse the one running daemon`,
 	Args: cobra.ArbitraryArgs,
@@ -88,7 +91,7 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(claudeCmd)
-	claudeCmd.Flags().Int("port", 22, "SSH port used when starting a fresh daemon")
+	claudeCmd.Flags().Int("port", 0, "SSH port used when starting a fresh daemon (default: the port in the target, else the ssh_config port, else 22)")
 	claudeCmd.Flags().Bool("keep-daemon", false, "keep the daemon running after claude exits (only if this command started it)")
 	claudeCmd.Flags().String("claude-bin", "claude", "path or name of the claude executable")
 	claudeCmd.Flags().String("dir", "", "remote directory to work in (default: the remote home directory)")

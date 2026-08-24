@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
@@ -170,11 +171,10 @@ func TestClientAssignsUniqueIDs(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	seen := map[uint64]bool{}
+	seen := set.New[uint64]()
 	for i := 0; i < 4; i++ {
 		id := <-ids
-		assert.False(t, seen[id], "request ids must be unique")
-		seen[id] = true
+		assert.True(t, seen.Add(id), "request ids must be unique")
 	}
 }
 

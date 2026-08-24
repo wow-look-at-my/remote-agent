@@ -392,6 +392,11 @@ func TestConnectInvalidHost(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	// Connect to an address that will be refused
+	_, errIPv6 := Connect(ConnectOptions{Host: "::1", Port: 1, User: "user"})
+	require.Error(t, errIPv6)
+	assert.Contains(t, errIPv6.Error(), "[::1]:1",
+		"an IPv6 address needs brackets, or the dial address is unparseable")
+
 	_, err := Connect(ConnectOptions{Host: "127.0.0.1", Port: 1, User: "user"})
 	assert.NotNil(t, err)
 
@@ -503,15 +508,40 @@ func TestKeepAliveDisconnect(t *testing.T) {
 func TestResolveSSHConfig(t *testing.T) {
 	old := sshGCommand
 	defer func() { sshGCommand = old }()
-	sshGCommand = func(host string) *exec.Cmd {
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname 1.2.3.4\nuser bob\nport 2222")
 	}
 
-	cfg := ResolveSSHConfig("myalias")
+	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "1.2.3.4", cfg.HostName)
 	assert.Equal(t, "bob", cfg.User)
 	assert.Equal(t, 2222, cfg.Port)
+}
+
+// ssh expands the %r and %p tokens of a ControlPath from what it is told, so a
+// host on port 2201 resolved without -p reports the socket of the same host on
+// port 22 -- a master for the wrong endpoint.
+func TestResolveSSHConfigPassesLoginAndPort(t *testing.T) {
+	old := sshGCommand
+	defer func() { sshGCommand = old }()
+	var args []string
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
+		cmd := old(user, host, port)
+		args = cmd.Args
+		return exec.Command("echo", "hostname 127.0.0.1")
+	}
+
+	require.NotNil(t, ResolveSSHConfig("root", "127.0.0.1", 2201))
+	assert.Contains(t, args, "-p")
+	assert.Contains(t, args, "2201")
+	assert.Contains(t, args, "-l")
+	assert.Contains(t, args, "root")
+	assert.Equal(t, "127.0.0.1", args[len(args)-1])
+
+	require.NotNil(t, ResolveSSHConfig("", "myalias", 0))
+	assert.NotContains(t, args, "-p", "a target that names no port must not pin one")
+	assert.NotContains(t, args, "-l")
 }
 
 func TestResolveSSHConfigMultipleLines(t *testing.T) {
@@ -519,11 +549,11 @@ func TestResolveSSHConfigMultipleLines(t *testing.T) {
 	defer func() { sshGCommand = old }()
 	// Realistic `ssh -G` output: the three wanted keys interleaved with many
 	// extra fields that must be ignored.
-	sshGCommand = func(host string) *exec.Cmd {
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "identityfile ~/.ssh/id_rsa\nhostname example.com\nforwardagent no\nuser deploy\naddkeystoagent no\nport 2200\nciphers aes128-ctr")
 	}
 
-	cfg := ResolveSSHConfig("myalias")
+	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "example.com", cfg.HostName)
 	assert.Equal(t, "deploy", cfg.User)
@@ -533,21 +563,21 @@ func TestResolveSSHConfigMultipleLines(t *testing.T) {
 func TestResolveSSHConfigCommandFails(t *testing.T) {
 	old := sshGCommand
 	defer func() { sshGCommand = old }()
-	sshGCommand = func(host string) *exec.Cmd {
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
 		return exec.Command("false")
 	}
 
-	assert.Nil(t, ResolveSSHConfig("myalias"))
+	assert.Nil(t, ResolveSSHConfig("", "myalias", 0))
 }
 
 func TestResolveSSHConfigPartialOutput(t *testing.T) {
 	old := sshGCommand
 	defer func() { sshGCommand = old }()
-	sshGCommand = func(host string) *exec.Cmd {
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname only.example.com")
 	}
 
-	cfg := ResolveSSHConfig("myalias")
+	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "only.example.com", cfg.HostName)
 	assert.Equal(t, "", cfg.User)
@@ -557,11 +587,11 @@ func TestResolveSSHConfigPartialOutput(t *testing.T) {
 func TestResolveSSHConfigInvalidPort(t *testing.T) {
 	old := sshGCommand
 	defer func() { sshGCommand = old }()
-	sshGCommand = func(host string) *exec.Cmd {
+	sshGCommand = func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname h.example.com\nport notanumber\nuser carol")
 	}
 
-	cfg := ResolveSSHConfig("myalias")
+	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "h.example.com", cfg.HostName)
 	assert.Equal(t, "carol", cfg.User)

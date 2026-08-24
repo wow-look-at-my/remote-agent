@@ -6,9 +6,13 @@ import (
 )
 
 var connectCmd = &cobra.Command{
-	Use:   "connect user@host",
+	Use:   "connect user@host[:port]",
 	Short: "Deploy agent and start daemon",
 	Long: `Deploy the helper binary and start the daemon for a target.
+
+The port is part of the target. Write it into the target (user@host:2201) or
+pass --port; either way one daemon serves one endpoint, so several hosts
+reached as root@127.0.0.1 on different ports stay separate.
 
 Commands ride an OpenSSH control master when one is answering on the
 ControlPath ssh_config sets for the host -- no second authentication, which is
@@ -27,5 +31,5 @@ connection to the host.`,
 
 func init() {
 	rootCmd.AddCommand(connectCmd)
-	connectCmd.Flags().Int("port", 22, "SSH port")
+	connectCmd.Flags().Int("port", 0, "SSH port (default: the port in the target, else the ssh_config port, else 22)")
 }

@@ -141,7 +141,7 @@ func grepTargets(root string, includes []string) ([]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && skipDirs[d.Name()] {
+			if p != root && skipDirs.Contains(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil

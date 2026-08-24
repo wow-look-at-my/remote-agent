@@ -61,6 +61,13 @@ func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protoco
 	if route.Target == "" {
 		return sendRequest(req)
 	}
+	// The port is part of the target: two ports on one host are two daemons,
+	// so the key is resolved once here and every lookup below uses it.
+	key, err := TargetKey(route.Target)
+	if err != nil {
+		return nil, err
+	}
+	route.Target = key
 	if err := checkControlPath(route); err != nil {
 		return nil, err
 	}
@@ -71,7 +78,11 @@ func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protoco
 	if !autoStartEnabled(req.Action) {
 		return nil, err
 	}
-	sockPath, startErr := autoStartDaemon(recordFor(route))
+	rec, recErr := recordFor(route)
+	if recErr != nil {
+		return nil, recErr
+	}
+	sockPath, startErr := autoStartDaemon(rec)
 	if startErr != nil {
 		return nil, startErr
 	}
@@ -116,10 +127,18 @@ func findSocket() (string, error) {
 		return s, nil
 	}
 	if TargetOverride != "" {
-		return daemon.SocketPath(TargetOverride), nil
+		key, err := TargetKey(TargetOverride)
+		if err != nil {
+			return "", err
+		}
+		return daemon.SocketPath(key), nil
 	}
 	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
-		return daemon.SocketPath(t), nil
+		key, err := TargetKey(t)
+		if err != nil {
+			return "", err
+		}
+		return daemon.SocketPath(key), nil
 	}
 
 	pattern := filepath.Join(os.TempDir(), "remote-agent-*.sock")
@@ -131,7 +150,7 @@ func findSocket() (string, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple daemons running (%d sockets found); pass --target user@host, or set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
+		return "", fmt.Errorf("multiple daemons running (%d sockets found); pass --target user@host[:port], or set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
 	}
 }
 
@@ -183,8 +202,10 @@ func (DaemonBackend) Call(route protocol.Route, action string, params map[string
 	return CallRoute(route, action, params, out)
 }
 
-// Connect starts the daemon for a target. controlPath, when set, is an
-// OpenSSH control-master socket the daemon must run its commands through.
+// Connect starts the daemon for a target. port, when set, is folded into the
+// target: the daemon for user@host:2201 is not the daemon for user@host:2202.
+// controlPath, when set, is an OpenSSH control-master socket the daemon must
+// run its commands through.
 func Connect(target string, port int, controlPath string) error {
 	return daemon.Start(daemon.StartOptions{
 		Target:      target,

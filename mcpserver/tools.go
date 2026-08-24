@@ -176,8 +176,10 @@ func (s *Server) buildTools() []tool {
 // exactly when the server has no default, so a call can never be routed to a
 // host nobody named.
 func (s *Server) tool(t tool) tool {
-	desc := "SSH target to act on, e.g. user@host or a Host alias from ~/.ssh/config. " +
-		"The connection is opened on demand."
+	desc := "SSH target to act on, e.g. user@host, user@host:2222 for a non-standard SSH port, " +
+		"or a Host alias from ~/.ssh/config. Give the port whenever the host listens on one: " +
+		"each port is a separate machine to act on, so root@127.0.0.1:2201 and root@127.0.0.1:2202 " +
+		"never share a connection. The connection is opened on demand."
 	if s.defaultTarget != "" {
 		desc += " Defaults to " + s.defaultTarget + "."
 	}
@@ -207,7 +209,7 @@ func (s *Server) route(args map[string]any) (protocol.Route, error) {
 		target = s.defaultTarget
 	}
 	if target == "" {
-		return protocol.Route{}, fmt.Errorf("missing required argument: target (the SSH target to act on, e.g. user@host)")
+		return protocol.Route{}, fmt.Errorf("missing required argument: target (the SSH target to act on, e.g. user@host or user@host:2222)")
 	}
 	controlPath := stringArg(args, "control_path")
 	if controlPath == "" {

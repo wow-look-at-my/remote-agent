@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
@@ -148,15 +149,15 @@ func readDiskInfo() []protocol.DiskInfo {
 	}
 	defer f.Close()
 
-	skipFS := map[string]bool{
-		"proc": true, "sysfs": true, "devtmpfs": true, "devpts": true,
-		"tmpfs": true, "cgroup": true, "cgroup2": true, "securityfs": true,
-		"pstore": true, "debugfs": true, "tracefs": true, "hugetlbfs": true,
-		"mqueue": true, "fusectl": true, "binfmt_misc": true, "configfs": true,
-		"efivarfs": true, "autofs": true, "overlay": true,
-	}
+	skipFS := set.Of(
+		"proc", "sysfs", "devtmpfs", "devpts",
+		"tmpfs", "cgroup", "cgroup2", "securityfs",
+		"pstore", "debugfs", "tracefs", "hugetlbfs",
+		"mqueue", "fusectl", "binfmt_misc", "configfs",
+		"efivarfs", "autofs", "overlay",
+	)
 
-	seen := make(map[string]bool)
+	seen := set.New[string]()
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -167,13 +168,12 @@ func readDiskInfo() []protocol.DiskInfo {
 		mountPoint := fields[1]
 		fsType := fields[2]
 
-		if skipFS[fsType] {
+		if skipFS.Contains(fsType) {
 			continue
 		}
-		if seen[mountPoint] {
+		if !seen.Add(mountPoint) {
 			continue
 		}
-		seen[mountPoint] = true
 
 		var stat syscall.Statfs_t
 		if err := syscall.Statfs(mountPoint, &stat); err != nil {

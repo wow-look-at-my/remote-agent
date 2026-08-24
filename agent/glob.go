@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
@@ -21,10 +22,7 @@ const DefaultGlobLimit = 500
 // and matching inside them is essentially never what a caller wants. A
 // pattern that names one explicitly (e.g. "node_modules/**") still reaches
 // it: the skip only applies to directories the walk discovers on its own.
-var skipDirs = map[string]bool{
-	".git":         true,
-	"node_modules": true,
-}
+var skipDirs = set.Of(".git", "node_modules")
 
 // GlobOptions configures a glob search.
 type GlobOptions struct {
@@ -75,7 +73,7 @@ func GlobFiles(opts GlobOptions) (*protocol.GlobResult, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && skipDirs[d.Name()] {
+			if p != root && skipDirs.Contains(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil

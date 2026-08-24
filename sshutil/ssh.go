@@ -30,16 +30,30 @@ type SSHConfig struct {
 	ControlPath string
 }
 
-// sshGCommand builds the `ssh -G <host>` command. It is a test seam so the
-// resolver can be exercised without invoking the real ssh binary.
-var sshGCommand = func(host string) *exec.Cmd { return exec.Command("ssh", "-G", host) }
+// sshGCommand builds the `ssh -G <host>` command. The login and the port are
+// passed along when the target names them, because ssh expands the %r and %p
+// tokens of a ControlPath with the values it is given: resolving a host on
+// port 2201 without -p reports the socket of the host on port 22.
+// It is a test seam so the resolver can be exercised without invoking the real
+// ssh binary.
+var sshGCommand = func(user, host string, port int) *exec.Cmd {
+	args := []string{"-G"}
+	if port > 0 {
+		args = append(args, "-p", strconv.Itoa(port))
+	}
+	if user != "" {
+		args = append(args, "-l", user)
+	}
+	return exec.Command("ssh", append(args, host)...)
+}
 
 // ResolveSSHConfig runs `ssh -G <host>` and parses the effective hostname, user,
-// and port for the given host (resolving any ~/.ssh/config Host alias). It
+// and port for the given host (resolving any ~/.ssh/config Host alias). user and
+// port are the ones the target named, empty and 0 when it named none. It
 // returns nil if ssh is unavailable or the command fails. Unknown keys and an
 // unparseable port are silently ignored.
-func ResolveSSHConfig(host string) *SSHConfig {
-	out, err := sshGCommand(host).Output()
+func ResolveSSHConfig(user, host string, port int) *SSHConfig {
+	out, err := sshGCommand(user, host, port).Output()
 	if err != nil {
 		slog.Debug("ssh -G failed; skipping ssh config resolution", "host", host, "error", err)
 		return nil
@@ -175,7 +189,9 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	// JoinHostPort, not "%s:%d": an IPv6 literal needs brackets, and knownhosts
+	// normalizes the same bracketed form when it records the key.
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)

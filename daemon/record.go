@@ -13,17 +13,24 @@ import (
 // paths are a one-way hash of the target, so without this a client that finds
 // a dead or missing socket has no way back to the target it should reconnect.
 type TargetRecord struct {
+	// Target is the canonical target, port included when one is known. It is
+	// what the socket, the PID file and this record are all named from.
 	Target string `json:"target"`
-	Port   int    `json:"port"`
+	// Port is the port the target itself names, 0 when it names none. It
+	// duplicates the port in Target, and is what lets a record written before
+	// the port became part of the target still reach the right endpoint.
+	Port int `json:"port"`
 	// ControlPath is the control-master socket the daemon ran through, empty
 	// when it dialed the host itself. A restart reuses it, and a client that
 	// asks for a different one can see that this daemon is not it.
 	ControlPath string `json:"control_path,omitempty"`
 }
 
-// TargetPath returns the target-record path for a given target.
+// TargetPath returns the target-record path for a given target. It keys on the
+// canonical target, the same as SocketPath, so a record always sits beside the
+// socket of the endpoint it describes.
 func TargetPath(target string) string {
-	h := sha256.Sum256([]byte(target))
+	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.target", h[:6]))
 }
 

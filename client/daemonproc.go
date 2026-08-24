@@ -27,7 +27,14 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	}
 	defer logf.Close()
 
-	args := []string{"connect", rec.Target, "--port", strconv.Itoa(rec.Port)}
+	// The target carries its own port, so --port is passed only when the record
+	// names one. A port the daemon resolves from ssh_config must not be passed
+	// back in: it would change the target, and with it the socket the caller
+	// is waiting on.
+	args := []string{"connect", rec.Target}
+	if rec.Port > 0 {
+		args = append(args, "--port", strconv.Itoa(rec.Port))
+	}
 	if rec.ControlPath != "" {
 		args = append(args, "--control-path", rec.ControlPath)
 	}

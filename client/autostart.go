@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/daemon"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
@@ -36,12 +37,12 @@ var errNoDaemon = errors.New("no daemon running")
 // autoStartExempt are actions that must not bring a daemon up. Connecting in
 // order to disconnect is absurd, and ping is how callers ask whether a daemon
 // is there at all.
-var autoStartExempt = map[string]bool{"disconnect": true, "ping": true}
+var autoStartExempt = set.Of("disconnect", "ping")
 
 // autoStartEnabled reports whether this process may start daemons.
 // REMOTE_AGENT_NO_AUTOSTART=1 turns it off.
 func autoStartEnabled(action string) bool {
-	if autoStartExempt[action] {
+	if autoStartExempt.Contains(action) {
 		return false
 	}
 	return os.Getenv("REMOTE_AGENT_NO_AUTOSTART") == ""
@@ -57,65 +58,100 @@ func resolveTarget() (daemon.TargetRecord, error) {
 		explicit = os.Getenv("REMOTE_AGENT_TARGET")
 	}
 	if explicit != "" {
-		return recordFor(protocol.Route{Target: explicit}), nil
+		return recordFor(protocol.Route{Target: explicit})
 	}
 
 	recs := daemon.ListTargetRecords()
 	switch len(recs) {
 	case 0:
-		return daemon.TargetRecord{}, errors.New("no target known: pass --target user@host or set REMOTE_AGENT_TARGET")
+		return daemon.TargetRecord{}, errors.New("no target known: pass --target user@host[:port] or set REMOTE_AGENT_TARGET")
 	case 1:
-		return recordFor(protocol.Route{Target: recs[0].Target}), nil
+		return recordFor(protocol.Route{Target: recs[0].Target})
 	default:
 		names := make([]string, 0, len(recs))
 		for _, r := range recs {
 			names = append(names, r.Target)
 		}
 		sort.Strings(names)
-		return daemon.TargetRecord{}, fmt.Errorf("several targets known (%v): pass --target user@host or set REMOTE_AGENT_TARGET", names)
+		return daemon.TargetRecord{}, fmt.Errorf("several targets known (%v): pass --target user@host[:port] or set REMOTE_AGENT_TARGET", names)
 	}
 }
 
-const defaultPort = 22
+// TargetKey returns the identity the daemon for a target keys on: the target
+// with the port it is reached on, from the target string itself or from
+// REMOTE_AGENT_PORT. The port belongs to the identity because one host on two
+// ports is two endpoints -- root@127.0.0.1:2201 and root@127.0.0.1:2202 must
+// not share a daemon, a socket or a target record.
+func TargetKey(target string) (string, error) {
+	return targetKey(target, 0)
+}
+
+// targetKey folds a port given separately, then REMOTE_AGENT_PORT, into a
+// target. An empty target stays empty: it names no endpoint to key on.
+func targetKey(target string, port int) (string, error) {
+	if target == "" {
+		return "", nil
+	}
+	if port == 0 {
+		if p, ok := portFromEnv(); ok {
+			port = p
+		}
+	}
+	return daemon.CanonicalTarget(target, port)
+}
 
 // DefaultTarget reports the target this process was pointed at, if any: the
 // --target flag, REMOTE_AGENT_TARGET, or the target recorded for a pinned
 // REMOTE_AGENT_SOCKET. Callers that route per request (the MCP server) use it
 // as the fallback for requests that name no target of their own; an empty
 // result means the request has to carry one.
-func DefaultTarget() string {
+func DefaultTarget() (string, error) {
 	if TargetOverride != "" {
-		return TargetOverride
+		return TargetKey(TargetOverride)
 	}
 	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
-		return t
+		return TargetKey(t)
 	}
 	if sock := os.Getenv("REMOTE_AGENT_SOCKET"); sock != "" {
 		if rec, err := daemon.TargetForSocket(sock); err == nil {
-			return rec.Target
+			return rec.Target, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
-// recordFor describes the daemon to start for a route. A record for this exact
-// target carries the port it was last reached on and the control master it
-// rode, if any; REMOTE_AGENT_PORT and the route's own control path win.
-func recordFor(route protocol.Route) daemon.TargetRecord {
-	rec := daemon.TargetRecord{Target: route.Target, Port: defaultPort}
-	if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(route.Target)); err == nil {
-		if prev.Port != 0 {
-			rec.Port = prev.Port
-		}
-		rec.ControlPath = prev.ControlPath
+// recordFor describes the daemon to start for a route. The record is named
+// from the canonical target, so the socket it waits on is the socket the
+// daemon opens. A record for that target carries the control master it rode,
+// if any; the route's own control path wins.
+func recordFor(route protocol.Route) (daemon.TargetRecord, error) {
+	key, err := targetKey(route.Target, 0)
+	if err != nil {
+		return daemon.TargetRecord{}, err
 	}
-	if p, ok := portFromEnv(); ok {
-		rec.Port = p
+	prev, prevErr := daemon.ReadTargetRecord(daemon.TargetPath(key))
+	ep, err := daemon.ParseTarget(key)
+	if err != nil {
+		return daemon.TargetRecord{}, err
+	}
+	// A record written before the port became part of the target keeps its
+	// port in a field of its own. Fold that port in, or a restart of such a
+	// daemon reaches port 22 and answers for the wrong endpoint.
+	if ep.Port == 0 && prevErr == nil && prev.Port > 0 {
+		if key, err = daemon.CanonicalTarget(key, prev.Port); err != nil {
+			return daemon.TargetRecord{}, err
+		}
+		ep.Port = prev.Port
+	}
+
+	rec := daemon.TargetRecord{Target: key, Port: ep.Port}
+	if prevErr == nil {
+		rec.ControlPath = prev.ControlPath
 	}
 	if cp := ControlPathFor(route); cp != "" {
 		rec.ControlPath = cp
 	}
-	return rec
+	return rec, nil
 }
 
 // ControlPathFor resolves the control-master socket a route should use: the

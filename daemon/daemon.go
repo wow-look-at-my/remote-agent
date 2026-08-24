@@ -78,22 +78,28 @@ func (d *Daemon) auditAsync(action, detail string) {
 	}()
 }
 
-// SocketPath returns the Unix socket path for a given host.
+// SocketPath returns the Unix socket path for a given target. The target is
+// canonicalized first, so user@host:2201 and user@host:2202 are two daemons
+// and every spelling of one endpoint is the same daemon.
 func SocketPath(target string) string {
-	h := sha256.Sum256([]byte(target))
+	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.sock", h[:6]))
 }
 
-// PIDPath returns the PID file path for a given host.
+// PIDPath returns the PID file path for a given target.
 func PIDPath(target string) string {
-	h := sha256.Sum256([]byte(target))
+	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.pid", h[:6]))
 }
 
 // StartOptions configures a daemon.
 type StartOptions struct {
-	Target string // user@host, or a ~/.ssh/config Host alias
-	Port   int    // SSH port; 0 means the configured or default port
+	Target string // [user@]host[:port], or a ~/.ssh/config Host alias
+	// Port is the SSH port when the target names none. It becomes part of the
+	// daemon's identity, exactly as a port written into the target does. A
+	// port here that disagrees with the one in the target is an error. 0 means
+	// the ssh_config port for the host, else 22.
+	Port int
 	// ControlPath is an OpenSSH control-master socket to run commands
 	// through. Naming one here makes it mandatory: the daemon fails rather
 	// than quietly opening its own connection to the host. Left empty, the
@@ -104,13 +110,17 @@ type StartOptions struct {
 
 // Start connects to the remote, deploys the helper binary, and starts the daemon.
 func Start(opts StartOptions) error {
-	target, port := opts.Target, opts.Port
-
-	// Parse user@host
-	user, host, err := parseTarget(target)
+	// The port is part of the target the daemon keys on, whether the caller
+	// wrote it into the target or passed it separately.
+	target, err := CanonicalTarget(opts.Target, opts.Port)
 	if err != nil {
 		return err
 	}
+	ep, err := ParseTarget(target)
+	if err != nil {
+		return err
+	}
+	user, host, port := ep.Login(), ep.Host, ep.Port
 
 	// Auto-connect: if a daemon for this target is already up and answering,
 	// reuse it rather than dialing/deploying a second time.
@@ -126,22 +136,25 @@ func Start(opts StartOptions) error {
 	// A control path named by the caller is a requirement, not a hint: the
 	// point of asking for one is not opening a second connection to the host.
 	controlPath, requireControl := opts.ControlPath, opts.ControlPath != ""
-	if cfg := sshutil.ResolveSSHConfig(host); cfg != nil {
+	if cfg := sshutil.ResolveSSHConfig(ep.User, host, port); cfg != nil {
 		if cfg.HostName != "" {
 			host = cfg.HostName
 		}
-		if cfg.User != "" && !strings.Contains(target, "@") { // only when user wasn't explicitly given
+		if cfg.User != "" && ep.User == "" { // only when user wasn't explicitly given
 			user = cfg.User
 		}
-		if cfg.Port != 0 && port == 22 { // only override the default port
+		if cfg.Port != 0 && port == 0 { // only when the target names no port
 			port = cfg.Port
 		}
 		if controlPath == "" {
 			controlPath = cfg.ControlPath
 		}
 	}
+	if port == 0 {
+		port = defaultSSHPort
+	}
 
-	fmt.Fprintf(os.Stderr, "Connecting to %s@%s:%d...\n", user, host, port)
+	fmt.Fprintf(os.Stderr, "Connecting to %s@%s...\n", user, net.JoinHostPort(host, strconv.Itoa(port)))
 
 	conn, err := sshutil.Connect(sshutil.ConnectOptions{
 		Host:           host,
@@ -211,7 +224,11 @@ func Start(opts StartOptions) error {
 	// later command can restart the daemon itself instead of erroring out --
 	// through the same control master, if that is how this one connected.
 	// Kept on shutdown.
-	WriteTargetRecord(TargetRecord{Target: target, Port: port, ControlPath: conn.ControlPath})
+	// Port records only a port the target itself names. A port that ssh_config
+	// resolved stays out: the target is the identity, and feeding a resolved
+	// port back into it would key the restarted daemon to a different socket
+	// than the one the client waits on.
+	WriteTargetRecord(TargetRecord{Target: target, Port: ep.Port, ControlPath: conn.ControlPath})
 
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
 	fmt.Fprintf(os.Stderr, "Ready.\n")
@@ -446,18 +463,6 @@ func findDeployBinary() (string, error) {
 	}
 
 	return "", fmt.Errorf("no suitable binary found for linux/amd64; build with: make build-linux")
-}
-
-func parseTarget(target string) (user, host string, err error) {
-	if user, host, found := strings.Cut(target, "@"); found {
-		return user, host, nil
-	}
-	// No user specified — fall back to $USER, then root.
-	currentUser := os.Getenv("USER")
-	if currentUser == "" {
-		currentUser = "root"
-	}
-	return currentUser, target, nil
 }
 
 func shellEscape(s string) string {

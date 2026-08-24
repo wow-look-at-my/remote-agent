@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
@@ -28,12 +29,12 @@ import (
 const protocolVersion = "2024-11-05"
 
 // supportedVersions are the protocol revisions we echo back verbatim.
-var supportedVersions = map[string]bool{
-	"2024-10-07": true,
-	"2024-11-05": true,
-	"2025-03-26": true,
-	"2025-06-18": true,
-}
+var supportedVersions = set.Of(
+	"2024-10-07",
+	"2024-11-05",
+	"2025-03-26",
+	"2025-06-18",
+)
 
 // Backend performs one daemon action against the host a route names, decoding
 // the result into out, and starts a daemon for that route when none is running.
@@ -131,7 +132,7 @@ func (s *Server) handleInitialize(req *request) *response {
 	_ = json.Unmarshal(req.Params, &params)
 
 	version := protocolVersion
-	if supportedVersions[params.ProtocolVersion] {
+	if supportedVersions.Contains(params.ProtocolVersion) {
 		version = params.ProtocolVersion
 	}
 	return result(req, map[string]any{

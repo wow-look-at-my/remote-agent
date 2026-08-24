@@ -52,7 +52,7 @@ remote-agent read /etc/hostname
 
 # Connecting up front is optional; it just moves the SSH setup out of the
 # first command
-remote-agent connect user@host           # --port N for a non-standard SSH port
+remote-agent connect user@host           # user@host:2222, or --port N, for a non-standard SSH port
 
 remote-agent ping
 remote-agent exec "uname -a"
@@ -95,7 +95,7 @@ just reads, edits and runs things — it never has to think about SSH.
 
 ```sh
 remote-agent claude user@host                 # start daemon, launch claude wired to it
-remote-agent claude user@host --port 2222     # non-standard SSH port
+remote-agent claude user@host:2222            # non-standard SSH port (--port 2222 does the same)
 remote-agent claude user@host -- --model opus # args after -- are passed to claude
 remote-agent claude                           # reuse the single running daemon
 ```
@@ -148,7 +148,8 @@ any other client.
 { "mcpServers": { "remote": { "command": "remote-agent", "args": ["mcp"] } } }
 ```
 
-Every tool takes the `target` it acts on (`user@host`, or a `Host` alias from
+Every tool takes the `target` it acts on (`user@host`, `user@host:2222` for a
+non-standard SSH port, or a `Host` alias from
 `~/.ssh/config`), and the SSH connection is opened on demand — nothing has to be
 started first, and one server can act on several hosts at once. Naming a target
 (`args: ["mcp", "user@host"]`, `--target`, or `REMOTE_AGENT_TARGET`) makes it the
@@ -174,8 +175,8 @@ the host (used automatically) or when the host needs no master.
 
 | Command | Description |
 |---------|-------------|
-| `connect <user@host>` | Start the daemon and SSH session up front. Optional: any command starts one on demand. `--port` sets the SSH port (default 22), `--control-path` an OpenSSH control master to run through. |
-| `claude [user@host]` | Launch Claude Code with its shell and its files on the remote. `--dir`, `--mount-at`, `--no-mount`, `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
+| `connect <user@host[:port]>` | Start the daemon and SSH session up front. Optional: any command starts one on demand. The port can also be `--port` (default: the ssh_config port, else 22); `--control-path` names an OpenSSH control master to run through. |
+| `claude [user@host[:port]]` | Launch Claude Code with its shell and its files on the remote. `--dir`, `--mount-at`, `--no-mount`, `--port`, `--keep-daemon`, `--claude-bin`; args after `--` pass through to claude. |
 | `mount <mountpoint> [remote-path]` | Mount the remote filesystem locally. `--allow-other` shares it with other local users. |
 | `unmount <mountpoint>` | Detach a mount. |
 | `mounts` | List live mounts. |
@@ -188,7 +189,7 @@ the host (used automatically) or when the host needs no master.
 | `edit <path>` | Find/replace in a remote file. `--old` (required) and `--new`; the text must be unique unless `--replace-all`. |
 | `glob <pattern> [path]` | List remote files matching a glob (`**`, braces), newest first. `--limit` caps results. |
 | `grep <pattern> [path]` | Search remote file contents by regex. `--include`, `--mode`, `-i`, `-C`, `--limit`. |
-| `mcp [user@host]` | Serve remote shells and filesystems to an MCP client over stdio (used by `claude`, usable by any MCP client). Every tool takes the target it acts on; a target given here is the default. |
+| `mcp [user@host[:port]]` | Serve remote shells and filesystems to an MCP client over stdio (used by `claude`, usable by any MCP client). Every tool takes the target it acts on; a target given here is the default. |
 | `ps` | List remote processes. `--filter` matches by name. |
 | `sysinfo` | Host, CPU, memory, disk, network, and GPU summary. |
 | `upload <local> <remote>` | Copy a local file to the remote. |
@@ -240,9 +241,11 @@ to dialing, and says so. `--control-path <socket>` (or
 fails rather than quietly opening its own. See
 [docs/ssh/control-sockets.md](docs/ssh/control-sockets.md).
 
-There is **one daemon per target host** (the socket path is derived from the
-target), so multiple terminals targeting the same host share a connection. When
-more than one daemon is running, pass `--target user@host` (or set
+There is **one daemon per target** (the socket path is derived from the
+target), so multiple terminals targeting the same host share a connection. The
+port is part of the target, so `root@127.0.0.1:2201` and `root@127.0.0.1:2202`
+are two separate daemons and two separate connections. When
+more than one daemon is running, pass `--target user@host[:port]` (or set
 `REMOTE_AGENT_TARGET` / `REMOTE_AGENT_SOCKET`) to pick which one a command talks
 to; `remote-agent claude` exports this automatically so its forwarded commands
 always reach the right daemon.
