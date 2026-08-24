@@ -8,15 +8,13 @@ import (
 	"sync"
 )
 
-// Bounds what a peer can make the other end allocate. Well above FUSE's 1 MiB write.
+// Bounds a peer's allocation, above FUSE's 1 MiB write. see docs/mount/behaviour.md
 const MaxPayload = 8 << 20
 
 // A header is small, so this only stops a corrupt length prefix allocating wildly.
 const MaxHeader = 16 << 20
 
-// A frame is `uint32 headerLen | header JSON | uint32 payloadLen | payload`. File data stays
-// out of the JSON: base64 inflates it by a third, and JSON cannot carry raw bytes at all.
-// Writer is safe for concurrent use, because a frame must reach the wire in one piece.
+// Writer is safe for concurrent use: a frame must reach the wire in one piece.
 type Writer struct {
 	mu sync.Mutex
 	w  io.Writer

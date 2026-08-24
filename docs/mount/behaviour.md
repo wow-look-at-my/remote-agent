@@ -59,6 +59,16 @@ waiting on it, forever.
 are in flight at once and replies arrive in whatever order the remote finishes
 them, so each reply is matched back to its caller by request ID.
 
+## The frame
+
+One frame is `uint32 headerLen | header JSON | uint32 payloadLen | payload`.
+File data stays out of the JSON: base64 would inflate every read and write by
+a third, and JSON strings cannot carry arbitrary bytes at all.
+
+`MaxPayload` bounds what a peer can make the other end allocate, and sits well
+above FUSE's 1 MiB write. `MaxHeader` exists only to stop a corrupt length
+prefix allocating wildly, because a header is small even for a large readdir.
+
 ## `O_APPEND` and open flags
 
 `O_APPEND` is stripped from the remote open (`agent/fsserver_unix.go`). Every
