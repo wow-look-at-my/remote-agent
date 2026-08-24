@@ -7,13 +7,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Stream is a long-lived remote command whose stdin and stdout stay open as a
-// bidirectional byte stream. It is the transport for the filesystem mount:
-// one process on the remote serving thousands of operations, rather than the
-// request/response commands CommandRunner issues.
-//
-// It occupies its own SSH channel for its whole life, outside the
-// CommandRunner pool, so ordinary commands keep running alongside a mount.
+// Stream is the mount's transport, on its own SSH channel. see docs/ssh/connection.md
 type Stream struct {
 	session *ssh.Session
 	stdin   io.WriteCloser
@@ -56,8 +50,7 @@ func (s *Stream) Read(p []byte) (int, error) { return s.stdout.Read(p) }
 
 // Close ends the remote command and releases the SSH channel.
 func (s *Stream) Close() error {
-	// Closing stdin lets a well-behaved helper exit on EOF; closing the
-	// session then reclaims the channel whether or not it did.
+	// EOF lets a well-behaved helper exit. The session close reclaims the channel regardless.
 	s.stdin.Close()
 	return s.session.Close()
 }

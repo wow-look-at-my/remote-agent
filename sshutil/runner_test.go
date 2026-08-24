@@ -96,12 +96,9 @@ func TestCommandRunnerStaleSpareRetry(t *testing.T) {
 	r, cleanup := newTestRunner(t)
 	defer cleanup()
 
-	// Wait for the full pool so the prewarm goroutine is quiescent and cannot
-	// slip a healthy spare in after we sabotage the pool.
+	// A full pool keeps prewarm quiet, so it cannot slip a healthy spare in below.
 	waitForSpares(t, r, spareTarget)
-	// Kill the spares behind the runner's back, simulating a server that tore
-	// down the pre-opened channels. The next Run must transparently retry on
-	// a fresh session.
+	// A server that tore down the pre-opened channels. The next Run must retry.
 	r.mu.Lock()
 	for _, s := range r.spares {
 		s.Close()

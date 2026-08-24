@@ -6,15 +6,12 @@ type DaemonRequest struct {
 	Params map[string]any `json:"params,omitempty"`
 }
 
-// Route says which host an action runs on and how to reach it. It travels
-// with a call rather than being process state, because one client -- the MCP
-// server -- serves several hosts at once and is handed a control socket as an
-// argument, not as configuration it could have been started with.
+// Route says which host an action runs on. It travels with the call, because one MCP
+// server serves several hosts and is handed each one mid-session.
 type Route struct {
 	// Target is the SSH target: user@host, or a ~/.ssh/config Host alias.
 	Target string `json:"target"`
-	// ControlPath is an OpenSSH control-master socket to run through. Naming
-	// one makes it mandatory: the daemon uses that master or fails.
+	// A control master to run through. Naming one makes it mandatory.
 	ControlPath string `json:"control_path,omitempty"`
 }
 
@@ -32,10 +29,8 @@ type ExecResult struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-// FileInfo is returned by the read action. Exactly one of Content and
-// ContentB64 is set: Content carries valid-UTF-8 file bytes as-is, while
-// ContentB64 carries any other (binary) file base64-encoded, because JSON
-// strings cannot transport invalid UTF-8 without corruption.
+// What read answers with. Exactly one of Content and ContentB64 is set, because JSON
+// cannot carry invalid UTF-8.
 type FileInfo struct {
 	Content    string `json:"content,omitempty"`
 	ContentB64 string `json:"content_b64,omitempty"`
@@ -51,8 +46,7 @@ type WriteResult struct {
 type EditResult struct {
 	Modified bool   `json:"modified"`
 	Message  string `json:"message,omitempty"`
-	// Replacements counts how many occurrences were replaced (1 unless the
-	// edit was a replace-all).
+	// Occurrences replaced. Always 1 unless the edit was a replace-all.
 	Replacements int `json:"replacements,omitempty"`
 }
 
@@ -73,9 +67,7 @@ const (
 	GrepModeCount   = "count"              // per-file match counts
 )
 
-// GrepMatch is a single line emitted by a content-mode grep. Context lines
-// (from the context_lines option) carry IsContext so they can be rendered
-// differently from real matches.
+// One line from a content-mode grep. IsContext separates context from a real match.
 type GrepMatch struct {
 	Path      string `json:"path"`
 	Line      int    `json:"line"`
@@ -98,8 +90,7 @@ type GrepResult struct {
 	Matches []GrepMatch     `json:"matches,omitempty"`
 	Files   []string        `json:"files,omitempty"`
 	Counts  []GrepFileCount `json:"counts,omitempty"`
-	// FilesScanned counts the files actually searched (binary files and
-	// files excluded by the include pattern are not counted).
+	// Files actually searched. A binary or excluded file does not count.
 	FilesScanned int `json:"files_scanned"`
 	// Truncated reports that output was cut off at the requested limit.
 	Truncated bool `json:"truncated,omitempty"`

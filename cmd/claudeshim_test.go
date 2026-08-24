@@ -9,9 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bashToolGlobMarker mirrors the machine-generated glob-setup clause Claude
-// Code v2.1.185 embeds in every Bash tool wrapper when CLAUDE_CODE_SHELL_PREFIX
-// is set (the claude-shim classification marker).
+// Mirrors the glob-setup clause claude-shim classifies a Bash tool wrapper by.
 const bashToolGlobMarker = "{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true"
 
 // NOTE: cmd-level claude-shim tests must only use Bash-tool-wrapper command
@@ -31,10 +29,8 @@ func TestClaudeShimForwardsWrapperAndWritesCwdFile(t *testing.T) {
 	defer func() { osExit = old }()
 
 	cwdFile := filepath.Join(dir, "claude-1a2b-cwd")
-	// The exact v2.1.185 wrapper shape: local snapshot source, glob marker,
-	// eval, cwd tail. The mock daemon executes what it receives via `sh -c`;
-	// the un-laundered wrapper would fail on the missing snapshot under a
-	// non-bash shell, and would clobber cwdFile from the "remote" side.
+	// The real wrapper shape: snapshot source, glob marker, eval, cwd tail. The mock
+	// runs what it gets, so an un-laundered wrapper dies on the missing snapshot.
 	wrapper := "source /nonexistent/shell-snapshots/snapshot-bash-1-a.sh 2>/dev/null || true && " +
 		bashToolGlobMarker + " && eval 'true' < /dev/null && pwd -P >| " + cwdFile
 

@@ -26,46 +26,22 @@ type LaunchOptions struct {
 	KeepDaemon bool     // keep a daemon we started running after claude exits
 	ShimDir    string   // directory for the shim + daemon log (default os.TempDir())
 
-	// RemoteDir is the remote directory to work in, mounted locally at the
-	// same path. Empty means the remote home directory.
-	RemoteDir string
-	// MountAt overrides the local mount point. Leaving it empty mounts at the
-	// identical path, which is what keeps the two halves of the session
-	// coherent: a path means the same thing to a file tool (local, through
-	// the mount) and to a shell command (remote, over SSH).
-	MountAt string
-	// NoMount skips the mount and falls back to serving the remote filesystem
-	// as MCP tools -- for platforms where FUSE is unavailable. Only the tools
-	// remote-agent itself provides reach the remote in that mode.
-	NoMount bool
-	// LocalTools, with NoMount, leaves Claude's built-in file tools in place
-	// so only Bash runs remotely.
-	LocalTools bool
-	// ControlPath is an OpenSSH control-master socket the session's daemon
-	// must run through, for a host this process cannot authenticate to itself.
-	ControlPath string
+	// see docs/claude/launcher.md for what these four change about a session
+	RemoteDir   string // remote directory to work in; empty means the remote home
+	MountAt     string // local mount point; empty mounts at the identical path
+	NoMount     bool   // serve the remote filesystem as MCP tools instead of mounting
+	LocalTools  bool   // with NoMount, keep Claude's own file tools; only Bash runs remotely
+	ControlPath string // OpenSSH control master the session's daemon must run through
 }
 
-// disabledLocalTools are the built-in Claude Code tools that reach the local
-// filesystem directly. They have no shell-prefix hook -- they call Node's fs
-// against the machine Claude runs on -- so the only way to keep a remote
-// session honest is to take them out of the tool set and hand the model the
-// remote MCP equivalents instead.
-//
-// Only names that actually exist are listed: claude warns at startup for each
-// deny rule that "matches no known tool", so speculative entries (MultiEdit,
-// NotebookRead) are startup noise rather than insurance.
+// Built-in tools that read local disk directly. Every name here must exist, or claude warns at startup.
 var disabledLocalTools = []string{"Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep"}
 
-// mcpServerName is the MCP server name Claude prefixes onto every remote tool
-// (mcp__remote__read_file, ...).
+// Claude prefixes this onto every remote tool: mcp__remote__read_file.
 const mcpServerName = "remote"
 
-// preAllowedRemoteTools are the read-only remote tools allowed up front, so
-// the swap keeps the permission behaviour of the built-ins it replaces:
-// Read/Glob/Grep never prompted, while Write/Edit did. The mutating tools
-// (write_file, edit_file, upload_file, download_file) are deliberately absent
-// and still go through the normal permission prompt.
+// Read-only tools, allowed up front because the built-ins they replace never prompted.
+// The mutating tools are absent on purpose. see docs/claude/launcher.md
 var preAllowedRemoteTools = []string{
 	"mcp__" + mcpServerName + "__read_file",
 	"mcp__" + mcpServerName + "__list_dir",
@@ -115,8 +91,7 @@ func LaunchClaude(opts LaunchOptions) error {
 		"REMOTE_AGENT_SOCKET":      sockPath,
 	}
 	if opts.Target != "" {
-		// So a forwarded command or the MCP server can bring the daemon back
-		// up by itself if it dies or idles out mid-session.
+		// Lets a forwarded command restart the daemon after an idle-out.
 		overrides["REMOTE_AGENT_TARGET"] = opts.Target
 	}
 	env := buildEnv(os.Environ(), overrides)
@@ -150,9 +125,7 @@ func LaunchClaude(opts LaunchOptions) error {
 
 		workDir = mountPoint
 		if mountPoint == remoteDir {
-			// Paths mean the same thing on both sides, so forwarded commands
-			// can run in the directory claude is working in rather than the
-			// remote home. The shim reads this.
+			// Both sides agree on the path, so the shim can cd into claude's directory.
 			env = buildEnv(env, map[string]string{"REMOTE_AGENT_MOUNT": mountPoint})
 			fmt.Fprintf(os.Stderr, "Mounted %s at the same local path; every tool now works on the remote host.\n", remoteDir)
 		} else {
@@ -183,21 +156,22 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 		// No target: reuse the single running daemon, if exactly one exists.
 		if s, ferr := findSocket(); ferr == nil && pingSocket(s) {
 			fmt.Fprintf(os.Stderr, "Using running daemon at %s.\n", s)
-			// The record beside the socket names the host, so the rest of the
-			// session can pass it explicitly instead of relying on discovery.
+			// The record names the host, so the session passes it instead of discovering it.
 			rec, _ := daemon.TargetForSocket(s)
 			return s, rec.Target, false, nil
 		}
-		// Nothing listening: fall back to the target a daemon last ran for,
-		// so a session that idled out can be resumed without retyping it.
+		// Nothing listening: resume the target a daemon last ran for.
 		rec, terr := resolveTarget()
 		if terr != nil {
 			return "", "", false, fmt.Errorf("%w\nspecify a target instead: remote-agent claude user@host", terr)
 		}
 		opts.Target = rec.Target
-		if opts.Port == 0 {
-			opts.Port = rec.Port
-		}
+	}
+
+	// The port is part of the target the daemon is keyed on, so --port folds
+	// into it here rather than travelling beside it.
+	if opts.Target, err = targetKey(opts.Target, opts.Port); err != nil {
+		return "", "", false, err
 	}
 
 	sockPath = daemon.SocketPath(opts.Target)
@@ -206,11 +180,16 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 		return sockPath, opts.Target, false, nil
 	}
 
+	rec, err := recordFor(protocol.Route{Target: opts.Target, ControlPath: opts.ControlPath})
+	if err != nil {
+		return "", "", false, err
+	}
+	// Wait on the socket the recorded target opens, not the one asked for.
+	sockPath = daemon.SocketPath(rec.Target)
+
 	logPath := filepath.Join(tmpDir(opts.ShimDir), "remote-agent-claude-daemon.log")
-	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", opts.Target, logPath)
-	proc, err := startDaemonFunc(self, recordFor(protocol.Route{
-		Target: opts.Target, ControlPath: opts.ControlPath,
-	}), logPath)
+	fmt.Fprintf(os.Stderr, "Starting remote-agent daemon for %s (log: %s)...\n", rec.Target, logPath)
+	proc, err := startDaemonFunc(self, rec, logPath)
 	if err != nil {
 		return "", "", false, fmt.Errorf("start daemon: %w", err)
 	}
@@ -218,16 +197,10 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 		return "", "", false, fmt.Errorf("daemon did not become ready: %w (see %s)", err, logPath)
 	}
 	fmt.Fprintf(os.Stderr, "Daemon ready.\n")
-	return sockPath, opts.Target, true, nil
+	return sockPath, rec.Target, true, nil
 }
 
-// remoteToolArgs returns the claude flags that swap the built-in local file
-// tools for the remote MCP toolset.
-//
-// Both flags use the "--flag=value" form deliberately: claude declares
-// --mcp-config and --disallowedTools as variadic options, so in the
-// space-separated form they would swallow every following argument -- including
-// the user's own prompt. The "=" form binds exactly one value.
+// Swaps the file tools for the MCP toolset. Keep the "=" form. see docs/claude/launcher.md
 func remoteToolArgs(configPath string) []string {
 	return []string{
 		"--mcp-config=" + configPath,
@@ -248,8 +221,7 @@ func writeMCPConfig(dir, self, sockPath, target string) (string, error) {
 	args := []string{"mcp"}
 	env := map[string]string{
 		"REMOTE_AGENT_BIN": self,
-		// Pinned explicitly so the tools reach this launch's daemon even if the
-		// environment is scrubbed or several daemons run.
+		// Pinned, so the tools reach this launch's daemon and not another one.
 		"REMOTE_AGENT_SOCKET": sockPath,
 	}
 	if target != "" {

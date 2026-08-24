@@ -2,11 +2,7 @@ package fswire
 
 import "os"
 
-// Portable open flags. The kernel's O_* values are NOT the same on every
-// platform -- O_APPEND is 0x8 on darwin and 0x400 on Linux, O_TRUNC and
-// O_EXCL differ too -- so a mount from a Mac to a Linux box would silently
-// truncate files if raw flags crossed the wire. Both ends translate to and
-// from these values instead.
+// Portable open flags: raw O_* values differ per platform. see docs/mount/behaviour.md
 const (
 	OpenRead   = 1 << 0
 	OpenWrite  = 1 << 1

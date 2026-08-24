@@ -12,10 +12,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/remotefs"
 )
 
-// mountRegistry tracks the filesystem mounts this daemon owns, keyed by their
-// local mount point. The daemon holds them because it owns the SSH connection
-// they run over: a mount is a long-lived stream on that connection, and it
-// must be torn down with it.
+// mountRegistry tracks this daemon's mounts by local path. Each is a stream on
+// its SSH connection, so both die together.
 type mountRegistry struct {
 	mu     sync.Mutex
 	mounts map[string]*mountEntry
@@ -26,8 +24,7 @@ type mountEntry struct {
 	remotePath string
 }
 
-// streamStarter opens a long-lived remote command stream. It is the seam for
-// testing the mount plumbing without SSH.
+// streamStarter opens a long-lived remote stream. The seam for testing mounts without SSH.
 type streamStarter func(command string) (mountStream, error)
 
 // mountStream is the bidirectional transport to the remote helper.
@@ -82,9 +79,7 @@ func (d *Daemon) mount(localPath, remotePath string, allowOther bool) error {
 	}
 
 	client := remotefs.New(stream, stream, stream)
-	// Verify the helper is actually answering before handing the mount to the
-	// kernel: a mountpoint backed by a dead helper hangs every process that
-	// touches it, which is far worse than failing here.
+	// A mount backed by a dead helper hangs every caller, so prove it answers first.
 	if err := client.Ping(); err != nil {
 		client.Close()
 		return fmt.Errorf("remote filesystem helper did not respond: %w", err)
@@ -141,8 +136,7 @@ func (d *Daemon) handleUnmountAction(params map[string]any) *protocol.DaemonResp
 	}
 
 	if err := entry.mount.Unmount(); err != nil {
-		// Put it back: the mount is still live, and forgetting it here would
-		// leak it past shutdown.
+		// Put it back: a live mount forgotten here leaks past shutdown.
 		d.mounts.mu.Lock()
 		d.mounts.mounts[abs] = entry
 		d.mounts.mu.Unlock()
@@ -164,9 +158,7 @@ func (d *Daemon) handleMountsAction() *protocol.DaemonResponse {
 	return okResponse(protocol.MountList{Mounts: list})
 }
 
-// hasMounts reports whether any mount is live. The idle watchdog consults it:
-// a mount is state the user is relying on, and unmounting it because nobody
-// ran a command for a while would break every open file under it.
+// hasMounts reports whether any mount is live, which is what holds the watchdog off.
 func (d *Daemon) hasMounts() bool {
 	d.mounts.mu.Lock()
 	defer d.mounts.mu.Unlock()
@@ -185,9 +177,7 @@ func (d *Daemon) unmountAll() {
 	d.mounts.mu.Unlock()
 
 	for path, entry := range entries {
-		// Force here: the SSH connection backing these mounts is about to
-		// close, and a mount left attached to a dead session hangs every
-		// process that touches it -- including ones that merely stat it.
+		// Force: the connection is closing, and a mount left on a dead one hangs even stat.
 		if err := entry.mount.ForceUnmount(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not unmount %s: %v\n", path, err)
 		}
@@ -211,8 +201,7 @@ func refuseSelfMount(runner Runner, localPath, remotePath string) error {
 	marker := filepath.Join(localPath, ".remote-agent-mount-check-"+randomSuffix())
 	f, err := os.Create(marker)
 	if err != nil {
-		// Cannot write the probe: leave the decision to the mount itself
-		// rather than refusing a mount that might be perfectly fine.
+		// Cannot write the probe: let the mount itself decide rather than refusing.
 		return nil
 	}
 	f.Close()

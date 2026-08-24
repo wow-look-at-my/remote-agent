@@ -176,10 +176,7 @@ func formatListing(listing *protocol.DirListing) string {
 	return b.String()
 }
 
-// execReply covers both shapes the exec action answers with: a command result,
-// and the directory listing the daemon substitutes when the command is a plain
-// `ls [path]` (parseLsCommand in daemon/ops.go). Decoding only the first would
-// turn `ls /srv` into an empty, successful-looking result.
+// exec answers with two shapes, and decoding only the first turns `ls /srv` into an empty success.
 type execReply struct {
 	protocol.ExecResult
 	protocol.DirListing
@@ -194,9 +191,7 @@ func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Each command is a separate one-shot shell on the remote, so a working
-	// directory has to travel with it; `cd` in one command does not carry to
-	// the next.
+	// Each command is its own one-shot shell, so the directory must travel with it.
 	if cwd := stringArg(args, "cwd"); cwd != "" {
 		command = "cd " + shellQuote(cwd) + " && " + command
 	}

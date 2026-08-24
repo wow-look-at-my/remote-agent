@@ -21,10 +21,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/remotefs"
 )
 
-// mountFixture is a live FUSE mount whose "remote" is a local directory
-// served by the real helper over an in-memory connection. Everything below
-// the mount point therefore travels the actual protocol: kernel -> FUSE ->
-// wire -> helper -> disk.
+// A live mount whose remote is a local directory, so every access travels the
+// real path: kernel, FUSE, wire, helper, disk.
 type mountFixture struct {
 	mnt    string // the mount point: what programs see
 	remote string // the backing directory: what the helper serves
@@ -63,11 +61,8 @@ func newMountFixture(t *testing.T) *mountFixture {
 	}
 
 	t.Cleanup(func() {
-		// Unmount first: the helper must outlive the mount, or in-flight
-		// operations fail during teardown.
-		// Force: a test that fails with a file still open must not leave a
-		// mount behind whose helper is about to die -- that mount would hang
-		// every later test (and any `df` on the machine).
+		// Unmount before the helper, and force it: a mount left on a dying helper
+		// hangs every later test, and any `df` on the machine.
 		if err := mount.ForceUnmount(); err != nil {
 			t.Logf("unmount: %v", err)
 		}
@@ -137,8 +132,7 @@ func TestMountAppendAndSeek(t *testing.T) {
 func TestMountLargeFile(t *testing.T) {
 	f := newMountFixture(t)
 
-	// Larger than one FUSE write (1 MiB), so this exercises chunking across
-	// many round trips.
+	// Larger than one FUSE write, so the data chunks across many round trips.
 	data := bytes.Repeat([]byte("0123456789abcdef"), 200*1024) // 3.2 MiB
 	require.NoError(t, os.WriteFile(f.path("big.bin"), data, 0o644))
 
@@ -236,8 +230,7 @@ func TestMountMissingFileIsENOENT(t *testing.T) {
 	_, err := os.ReadFile(f.path("nope.txt"))
 	assert.True(t, os.IsNotExist(err), "a missing remote file must report ENOENT, got %v", err)
 
-	// And a file created behind the mount's back appears immediately:
-	// negative lookups are deliberately not cached.
+	// Negative lookups are not cached, so a file created behind the mount appears at once.
 	require.NoError(t, os.WriteFile(f.remotePath("appeared.txt"), []byte("new"), 0o644))
 	content, err := os.ReadFile(f.path("appeared.txt"))
 	require.NoError(t, err, "a file created on the remote must be visible without waiting for a cache to expire")
@@ -252,8 +245,7 @@ func TestMountReflectsRemoteChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "before", string(content))
 
-	// Change it on the remote (as a forwarded shell command would) and read
-	// again. Attribute caching means this can take up to the cache window.
+	// A change on the remote, as a forwarded command makes. It can take a cache window.
 	require.NoError(t, os.WriteFile(f.remotePath("shared.txt"), []byte("after-the-change"), 0o644))
 
 	deadline := time.Now().Add(5 * time.Second)

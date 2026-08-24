@@ -27,8 +27,7 @@ const (
 	capturedWrapperLs = "source /root/cc185-config/shell-snapshots/snapshot-bash-1784154477479-hs63nj.sh 2>/dev/null || true && " +
 		"{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true && " +
 		"eval 'ls -la' < /dev/null && pwd -P >| /tmp/claude-643c-cwd"
-	// Real hook command line captured from the same rig (SessionStart hook,
-	// passed to the prefix bare -- no wrapper scaffolding).
+	// A real SessionStart hook line from the same rig: bare, with no wrapper.
 	capturedHookCommand = `"$CLAUDE_PROJECT_DIR"/hooks/export-session-env.sh`
 )
 
@@ -78,8 +77,7 @@ func TestLaunderBashToolWrapperGolden(t *testing.T) {
 			wantCwdFile:   "/tmp/claude-643c-cwd",
 		},
 		{
-			// Quoted paths (produced when a path falls outside the safe
-			// charset, e.g. contains spaces).
+			// Claude quotes a path outside the safe charset, a space for example.
 			name: "quoted snapshot and cwd paths",
 			in: "source '/Users/Some User/.claude/shell-snapshots/snapshot-zsh-1784-ab.sh' 2>/dev/null || true && " +
 				glob + " && eval 'make test' < /dev/null && pwd -P >| '/tmp/dir with space/claude-1a2b-cwd'",
@@ -95,16 +93,14 @@ func TestLaunderBashToolWrapperGolden(t *testing.T) {
 			wantCwdFile:   "/tmp/o'brien/claude-11-cwd",
 		},
 		{
-			// Snapshot creation failed locally: Claude spawns a login shell
-			// and emits no source clause.
+			// A failed local snapshot: Claude spawns a login shell and emits no source clause.
 			name:          "no source clause",
 			in:            glob + " && eval 'uname -a' < /dev/null && pwd -P >| /tmp/claude-9f-cwd",
 			wantLaundered: glob + " && eval 'uname -a' < /dev/null",
 			wantCwdFile:   "/tmp/claude-9f-cwd",
 		},
 		{
-			// The session-env preamble is inlined text (may span lines, ends
-			// with "\n:") and must be forwarded verbatim.
+			// The preamble is inlined text that can span lines. It goes over verbatim.
 			name: "session-env preamble survives",
 			in: "source /root/.claude/shell-snapshots/snapshot-bash-2-y.sh 2>/dev/null || true && " +
 				"export FOO=bar\nexport BAZ='q q'\n: && " +
@@ -113,8 +109,7 @@ func TestLaunderBashToolWrapperGolden(t *testing.T) {
 			wantCwdFile:   "/tmp/claude-77-cwd",
 		},
 		{
-			// A lookalike tail inside the quoted eval body must not be
-			// stripped -- only the genuine final tail is.
+			// Only the genuine final tail is stripped, never a lookalike in the eval body.
 			name: "lookalike tail inside eval body",
 			in: glob + " && eval 'echo hi && pwd -P >| /tmp/user-file' < /dev/null && " +
 				"pwd -P >| /tmp/claude-ab-cwd",
@@ -122,25 +117,21 @@ func TestLaunderBashToolWrapperGolden(t *testing.T) {
 			wantCwdFile:   "/tmp/claude-ab-cwd",
 		},
 		{
-			// A lookalike tail at the very end of the eval body (no genuine
-			// tail after it -- malformed input) parses past the closing quote
-			// and must be left alone.
+			// Malformed input: a lookalike ends the eval body with no genuine tail after it.
 			name:          "lookalike tail not at end of string",
 			in:            glob + " && eval 'x && pwd -P >| /tmp/foo' < /dev/null",
 			wantLaundered: glob + " && eval 'x && pwd -P >| /tmp/foo' < /dev/null",
 			wantCwdFile:   "",
 		},
 		{
-			// Sourcing anything that is not a Claude shell snapshot is left
-			// untouched.
+			// A source of anything but a Claude snapshot stays.
 			name:          "non-snapshot source clause kept",
 			in:            "source /etc/profile 2>/dev/null || true && " + glob + " && eval pwd < /dev/null && pwd -P >| /tmp/claude-cc-cwd",
 			wantLaundered: "source /etc/profile 2>/dev/null || true && " + glob + " && eval pwd < /dev/null",
 			wantCwdFile:   "/tmp/claude-cc-cwd",
 		},
 		{
-			// A source clause missing the exact silencing suffix is left
-			// untouched (conservative no-match).
+			// No exact silencing suffix, so the clause does not match and stays.
 			name:          "source clause without expected suffix kept",
 			in:            "source /root/.claude/shell-snapshots/snapshot-bash-3-z.sh || true && " + glob + " && eval pwd < /dev/null && pwd -P >| /tmp/claude-dd-cwd",
 			wantLaundered: "source /root/.claude/shell-snapshots/snapshot-bash-3-z.sh || true && " + glob + " && eval pwd < /dev/null",
@@ -249,8 +240,7 @@ func TestForwardBashToolWrapperSendsLaunderedCommand(t *testing.T) {
 	assert.Equal(t, bashToolMarker+" && eval pwd < /dev/null", got[0],
 		"the daemon must receive exactly the laundered wrapper")
 
-	// Success writes the LOCAL cwd file with this process's physical cwd, the
-	// way a local `pwd -P >|` would have.
+	// Success writes the local cwd file, the way a local `pwd -P >|` would have.
 	data, err := os.ReadFile(cwdFile)
 	require.NoError(t, err)
 	wd, err := os.Getwd()
@@ -337,8 +327,7 @@ func TestRunLocalPortableStdioAndExitCode(t *testing.T) {
 	localStderr = &stderr
 	defer func() { localStdin, localStdout, localStderr = oldIn, oldOut, oldErr }()
 
-	// stdin is passed through (cat), both output streams arrive on the right
-	// fds, and the exit code is reported exactly.
+	// stdin passes through, each stream lands on its own fd, and the exit code is exact.
 	code, err := runLocalPortable("cat; echo out; echo err >&2; exit 7")
 	require.NoError(t, err)
 	assert.Equal(t, 7, code)
@@ -377,8 +366,7 @@ func TestPrefixWorkingDirectory(t *testing.T) {
 		t.Setenv("REMOTE_AGENT_MOUNT", mount)
 		t.Chdir(sub)
 		got := prefixWorkingDirectory("make build")
-		// The path is quoted and joined with && so a failed cd aborts rather
-		// than running the command in the wrong directory.
+		// && and not ;: a failed cd must abort, not run the command elsewhere.
 		assert.Equal(t, "cd '"+sub+"' && make build", got)
 	})
 
@@ -389,8 +377,7 @@ func TestPrefixWorkingDirectory(t *testing.T) {
 	})
 
 	t.Run("outside the mount is left alone", func(t *testing.T) {
-		// A working directory that is not under the mount is not a valid
-		// remote path, so prefixing it would break every command.
+		// Outside the mount there is no valid remote path, so nothing is prefixed.
 		t.Setenv("REMOTE_AGENT_MOUNT", mount)
 		t.Chdir(t.TempDir())
 		assert.Equal(t, "ls", prefixWorkingDirectory("ls"))

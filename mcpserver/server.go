@@ -18,27 +18,22 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// protocolVersion is the MCP revision this server implements. A client that
-// asks for a different revision gets its own version echoed back when we can
-// speak it (the wire format has been compatible across these revisions);
-// anything unknown falls back to this one.
+// The MCP revision this server implements. A revision it can speak is echoed back instead.
 const protocolVersion = "2024-11-05"
 
 // supportedVersions are the protocol revisions we echo back verbatim.
-var supportedVersions = map[string]bool{
-	"2024-10-07": true,
-	"2024-11-05": true,
-	"2025-03-26": true,
-	"2025-06-18": true,
-}
+var supportedVersions = set.Of(
+	"2024-10-07",
+	"2024-11-05",
+	"2025-03-26",
+	"2025-06-18",
+)
 
-// Backend performs one daemon action against the host a route names, decoding
-// the result into out, and starts a daemon for that route when none is running.
-// It is the seam that keeps the tool layer testable without a daemon or an SSH
-// host.
+// Backend runs one action on the host a route names, and starts a daemon when none answers.
 type Backend interface {
 	Call(route protocol.Route, action string, params map[string]any, out any) error
 }
@@ -47,21 +42,16 @@ type Backend interface {
 type Server struct {
 	backend Backend
 	version string
-	// defaultTarget is the SSH target used by calls that omit one. Empty makes
-	// the target argument mandatory on every tool.
+	// For calls that omit a target. Empty makes the target argument mandatory.
 	defaultTarget string
-	// defaultControlPath is the control-master socket used by calls that name
-	// none. Empty leaves the choice to ssh_config, per host.
+	// For calls that name no control master. Empty leaves the choice to ssh_config.
 	defaultControlPath string
 	tools              []tool
 	out                *json.Encoder
 }
 
-// New returns a server exposing the remote toolset backed by b. version is
-// reported to the client as the server version. defaultTarget, when non-empty,
-// is the SSH target tool calls act on unless they name another; when it is
-// empty every tool call must carry its own target. defaultControlPath is the
-// control master calls ride unless they name their own.
+// New returns a server over b. The two defaults apply to calls that name neither a
+// target nor a control master; an empty defaultTarget makes the argument mandatory.
 func New(b Backend, version, defaultTarget, defaultControlPath string) *Server {
 	s := &Server{
 		backend:            b,
@@ -73,15 +63,8 @@ func New(b Backend, version, defaultTarget, defaultControlPath string) *Server {
 	return s
 }
 
-// Serve reads JSON-RPC messages from in until EOF, writing replies to out.
-//
-// Requests are handled strictly in arrival order. Handling them concurrently
-// would shave latency off batched reads, but it also reorders writes: a client
-// that sends write_file and then edit_file for the same path without waiting
-// would see the edit run against the pre-write contents. Claude Code never
-// pipelines MCP calls (MCP tools inherit isConcurrencySafe=false, so its tool
-// executor runs them one at a time), so serializing costs nothing there and
-// keeps every other client's dependent operations ordered.
+// Serve answers JSON-RPC messages strictly in arrival order. Concurrency would reorder
+// a write and the edit that follows it, and Claude Code never pipelines MCP calls anyway.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	s.out = json.NewEncoder(out)
 	dec := json.NewDecoder(in)
@@ -92,8 +75,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			if err == io.EOF {
 				return nil
 			}
-			// A malformed message cannot be answered (its id is unknown) and
-			// leaves the stream unparseable, so the session ends here.
+			// A malformed message has no id to answer and leaves the stream unparseable.
 			return fmt.Errorf("decode request: %w", err)
 		}
 		if req.ID == nil {
@@ -131,7 +113,7 @@ func (s *Server) handleInitialize(req *request) *response {
 	_ = json.Unmarshal(req.Params, &params)
 
 	version := protocolVersion
-	if supportedVersions[params.ProtocolVersion] {
+	if supportedVersions.Contains(params.ProtocolVersion) {
 		version = params.ProtocolVersion
 	}
 	return result(req, map[string]any{
@@ -173,10 +155,7 @@ func (s *Server) handleToolCall(req *request) *response {
 
 	content, err := t.handler(params.Arguments)
 	if err != nil {
-		// Tool failures are reported in the result, not as a protocol error:
-		// the model is meant to see them and adapt (wrong path, ambiguous
-		// edit), which a JSON-RPC error would hide behind a client-level
-		// failure.
+		// A tool failure rides the result, so the model sees it. A JSON-RPC error hides it.
 		return result(req, callResult{
 			Content: []contentBlock{{Type: "text", Text: "Error: " + err.Error()}},
 			IsError: true,

@@ -6,9 +6,7 @@ on:
 permissions:
   id-token: write
   contents: write
-  # go-toolchain's autorelease registers each buildhost publish as a GitHub
-  # Deployment and posts an artifact storage record. Neither has an opt-out and
-  # both fail the build when ungranted.
+  # autorelease fails the build without these two -- see CLAUDE.md.
   deployments: write
   artifact-metadata: write
   actions: read
@@ -19,8 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The mount tests do a real FUSE mount. Installing fuse3 keeps them
-      # running here rather than skipping: a mount that only ever works on a
-      # developer's machine is not a tested mount.
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3
+      # fuse3 runs the real mount tests; bubblewrap sandboxes the dats suites.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3 bubblewrap
+      # Native binaries, not the default fat APE: go-fuse needs syscall.Splice.
       - uses: wow-look-at-my/go-toolchain@v1
+        with:
+          os: linux,darwin,windows
+          arch: amd64,arm64

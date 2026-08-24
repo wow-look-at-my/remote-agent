@@ -77,7 +77,8 @@ func TestResolveTargetFromFlag(t *testing.T) {
 	rec, err := resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, "root@flag-host", rec.Target)
-	assert.Equal(t, 22, rec.Port)
+	// A target naming no port keeps none. ssh_config, else 22, decides on connect.
+	assert.Equal(t, 0, rec.Port)
 }
 
 func TestResolveTargetFlagBeatsEnv(t *testing.T) {
@@ -91,25 +92,28 @@ func TestResolveTargetFlagBeatsEnv(t *testing.T) {
 
 func TestResolveTargetPortFromRecordAndEnv(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@host", Port: 2222}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@host:2222"}))
 
-	TargetOverride = "root@host"
+	TargetOverride = "root@host:2222"
 	rec, err := resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, 2222, rec.Port)
 
+	// A port from the environment keys its own daemon, and never redirects the one above.
+	TargetOverride = "root@host"
 	t.Setenv("REMOTE_AGENT_PORT", "2022")
 	rec, err = resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, 2022, rec.Port)
+	assert.Equal(t, "root@host:2022", rec.Target)
 }
 
 func TestResolveTargetFromRecord(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 2222}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered:2222"}))
 	rec, err := resolveTarget()
 	require.NoError(t, err)
-	assert.Equal(t, "root@remembered", rec.Target)
+	assert.Equal(t, "root@remembered:2222", rec.Target)
 	assert.Equal(t, 2222, rec.Port)
 }
 
@@ -130,7 +134,7 @@ func TestResolveTargetAmbiguous(t *testing.T) {
 
 func TestSendRequestAutoStartsFromRecord(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 2222}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered:2222"}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
@@ -138,7 +142,7 @@ func TestSendRequestAutoStartsFromRecord(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.OK)
 	require.Len(t, calls, 1)
-	assert.Equal(t, "root@remembered", calls[0].Target)
+	assert.Equal(t, "root@remembered:2222", calls[0].Target)
 	assert.Equal(t, 2222, calls[0].Port)
 }
 
@@ -273,8 +277,7 @@ func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
 
 func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 	isolate(t)
-	// A live daemon this process is otherwise pinned to. A call that names its
-	// own target must not be answered by it.
+	// A live daemon this process is pinned to. A call naming its own target must miss it.
 	other := daemon.SocketPath("root@other")
 	listenAt(t, other)
 	t.Setenv("REMOTE_AGENT_SOCKET", other)
@@ -291,11 +294,11 @@ func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 
 func TestSendRequestForUsesRecordedPort(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@ported", Port: 2222}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@ported:2222"}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
-	_, err := sendRequestFor(protocol.Route{Target: "root@ported"}, &protocol.DaemonRequest{Action: "ls"})
+	_, err := sendRequestFor(protocol.Route{Target: "root@ported:2222"}, &protocol.DaemonRequest{Action: "ls"})
 	require.NoError(t, err)
 	require.Len(t, calls, 1)
 	assert.Equal(t, 2222, calls[0].Port)
@@ -326,7 +329,7 @@ func TestSendRequestForNoAutoStartHonored(t *testing.T) {
 
 func TestSendRequestForEmptyTargetFallsBackToDiscovery(t *testing.T) {
 	isolate(t)
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered", Port: 22}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@remembered"}))
 	var calls []daemon.TargetRecord
 	stubStart(t, &calls)
 
@@ -338,18 +341,112 @@ func TestSendRequestForEmptyTargetFallsBackToDiscovery(t *testing.T) {
 
 func TestDefaultTargetPrecedence(t *testing.T) {
 	isolate(t)
-	assert.Empty(t, DefaultTarget())
+	got, err := DefaultTarget()
+	require.NoError(t, err)
+	assert.Empty(t, got)
 
 	// A pinned socket names its host through the record beside it.
-	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@socket-host", Port: 22}))
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{Target: "root@socket-host"}))
 	t.Setenv("REMOTE_AGENT_SOCKET", daemon.SocketPath("root@socket-host"))
-	assert.Equal(t, "root@socket-host", DefaultTarget())
+	got, err = DefaultTarget()
+	require.NoError(t, err)
+	assert.Equal(t, "root@socket-host", got)
 
 	t.Setenv("REMOTE_AGENT_TARGET", "root@env-host")
-	assert.Equal(t, "root@env-host", DefaultTarget())
+	got, err = DefaultTarget()
+	require.NoError(t, err)
+	assert.Equal(t, "root@env-host", got)
 
 	TargetOverride = "root@flag-host"
-	assert.Equal(t, "root@flag-host", DefaultTarget())
+	got, err = DefaultTarget()
+	require.NoError(t, err)
+	assert.Equal(t, "root@flag-host", got)
+}
+
+// A default target the MCP server hands to every call must carry the port, or
+// the calls land on whichever endpoint of that host connected first.
+func TestDefaultTargetKeepsPort(t *testing.T) {
+	isolate(t)
+	TargetOverride = "root@127.0.0.1:2201"
+	got, err := DefaultTarget()
+	require.NoError(t, err)
+	assert.Equal(t, "root@127.0.0.1:2201", got)
+
+	TargetOverride = "root@127.0.0.1"
+	t.Setenv("REMOTE_AGENT_PORT", "2202")
+	got, err = DefaultTarget()
+	require.NoError(t, err)
+	assert.Equal(t, "root@127.0.0.1:2202", got)
+}
+
+func TestTargetKeyFoldsPorts(t *testing.T) {
+	isolate(t)
+	key, err := TargetKey("root@127.0.0.1:2201")
+	require.NoError(t, err)
+	assert.Equal(t, "root@127.0.0.1:2201", key)
+
+	t.Setenv("REMOTE_AGENT_PORT", "2202")
+	key, err = TargetKey("root@127.0.0.1")
+	require.NoError(t, err)
+	assert.Equal(t, "root@127.0.0.1:2202", key, "REMOTE_AGENT_PORT is part of the endpoint's identity")
+
+	_, err = TargetKey("root@127.0.0.1:2201")
+	assert.Error(t, err, "a target port and REMOTE_AGENT_PORT that disagree name two hosts")
+
+	key, err = TargetKey("")
+	require.NoError(t, err)
+	assert.Empty(t, key)
+}
+
+// The defect this fixes: two endpoints reachable as root@127.0.0.1 on
+// different ports shared one daemon, so every call went to whichever one
+// started first.
+func TestPortedTargetsGetTheirOwnDaemon(t *testing.T) {
+	isolate(t)
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	for _, target := range []string{"root@127.0.0.1:2201", "root@127.0.0.1:2202"} {
+		_, err := sendRequestFor(protocol.Route{Target: target}, &protocol.DaemonRequest{Action: "ls"})
+		require.NoError(t, err)
+	}
+
+	require.Len(t, calls, 2, "each port must start a daemon of its own")
+	assert.Equal(t, "root@127.0.0.1:2201", calls[0].Target)
+	assert.Equal(t, 2201, calls[0].Port)
+	assert.Equal(t, "root@127.0.0.1:2202", calls[1].Target)
+	assert.Equal(t, 2202, calls[1].Port)
+	assert.NotEqual(t, daemon.SocketPath(calls[0].Target), daemon.SocketPath(calls[1].Target))
+}
+
+// A daemon on one port must not answer a call meant for another port on the
+// same host, even while it is running.
+func TestRunningDaemonDoesNotServeAnotherPort(t *testing.T) {
+	isolate(t)
+	var calls []daemon.TargetRecord
+	stubStart(t, &calls)
+
+	listenAt(t, daemon.SocketPath("root@127.0.0.1:2201"))
+	_, err := sendRequestFor(protocol.Route{Target: "root@127.0.0.1:2202"}, &protocol.DaemonRequest{Action: "ls"})
+	require.NoError(t, err)
+
+	require.Len(t, calls, 1)
+	assert.Equal(t, "root@127.0.0.1:2202", calls[0].Target)
+}
+
+// A record written before the port joined the target keeps its port in a field
+// of its own. Restarting that daemon has to reach the same endpoint.
+func TestLegacyRecordPortFoldsIntoTheKey(t *testing.T) {
+	isolate(t)
+	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{
+		Target: "root@127.0.0.1", Port: 2201, ControlPath: "/tmp/legacy.sock",
+	}))
+
+	rec, err := recordFor(protocol.Route{Target: "root@127.0.0.1"})
+	require.NoError(t, err)
+	assert.Equal(t, "root@127.0.0.1:2201", rec.Target)
+	assert.Equal(t, 2201, rec.Port)
+	assert.Equal(t, "/tmp/legacy.sock", rec.ControlPath)
 }
 
 func TestSendRequestForStartsDaemonThroughControlMaster(t *testing.T) {

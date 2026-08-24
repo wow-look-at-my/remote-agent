@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
@@ -30,8 +31,7 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{results: map[string]any{}}
 }
 
-// testTarget is the default target the test servers are built with, standing in
-// for the one `remote-agent mcp user@host` is given.
+// Stands in for the target `remote-agent mcp user@host` is given.
 const testTarget = "user@testhost"
 
 func (f *fakeBackend) Call(route protocol.Route, action string, params map[string]any, out any) error {
@@ -112,16 +112,16 @@ func TestToolsList(t *testing.T) {
 	responses := exchange(t, newFakeBackend(), `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 
 	tools := responses[0]["result"].(map[string]any)["tools"].([]any)
-	names := map[string]bool{}
+	names := set.New[string]()
 	for _, entry := range tools {
 		tool := entry.(map[string]any)
-		names[tool["name"].(string)] = true
+		names.Add(tool["name"].(string))
 		assert.NotEmpty(t, tool["description"], "%s needs a description", tool["name"])
 		schema := tool["inputSchema"].(map[string]any)
 		assert.Equal(t, "object", schema["type"])
 	}
 	for _, want := range []string{"run_command", "read_file", "write_file", "edit_file", "list_dir", "glob", "grep", "upload_file", "download_file"} {
-		assert.True(t, names[want], "missing tool %s", want)
+		assert.True(t, names.Contains(want), "missing tool %s", want)
 	}
 }
 

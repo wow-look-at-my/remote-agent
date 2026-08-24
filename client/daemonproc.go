@@ -27,7 +27,11 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	}
 	defer logf.Close()
 
-	args := []string{"connect", rec.Target, "--port", strconv.Itoa(rec.Port)}
+	// The target carries its port, so --port goes only where the record names one.
+	args := []string{"connect", rec.Target}
+	if rec.Port > 0 {
+		args = append(args, "--port", strconv.Itoa(rec.Port))
+	}
 	if rec.ControlPath != "" {
 		args = append(args, "--control-path", rec.ControlPath)
 	}

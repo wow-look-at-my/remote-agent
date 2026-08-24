@@ -37,9 +37,16 @@ from the repo root. It runs `go mod tidy`, `go vet`, tests with coverage, and th
 build in one step, and downloads the pinned Go version itself.
 
 ```
-go-toolchain                 # tidy + vet + test (coverage) + build -> build/remote-agent
+go-toolchain                 # tidy + vet + test (coverage) + build + dats -> build/remote-agent
 go-toolchain --no-benchmark  # skip the benchmark phase (faster inner loop)
 ```
+
+`dats/cli.dats` is the CLI-level suite, run by the same command after the build
+(it needs `bubblewrap`, or docker, for its sandbox). It asserts what the binary
+does with a target -- which daemon socket a target picks, which address
+`connect` names, what the MCP tools advertise -- so behaviour that only shows up
+through the CLI has a test that runs on every build. A check of that kind goes
+there, never into a throwaway script.
 
 The one dependency that needs care is `github.com/hanwen/go-fuse/v2`: the org
 module proxy does not serve its checksum-database entry, so `go mod tidy`
@@ -69,6 +76,17 @@ add a `publish` job to build.yml — it would duplicate autorelease.
 
 A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
 `make build-all`), but `go-toolchain` is the source of truth.
+
+## Docs
+
+Depth the code comments point at, rather than carry:
+
+- `docs/claude/launcher.md` -- mount point identity, tool swap, claude flag form, pinned env.
+- `docs/claude/shim.md` -- the three prefix-wrapped spawn kinds, the Bash wrapper, laundering.
+- `docs/daemon/lifecycle.md` -- target identity and port, ssh_config, idle accounting, shutdown order.
+- `docs/mount/behaviour.md` -- cache windows, mount options, force unmount, open flags.
+- `docs/ssh/connection.md` -- ssh_config resolution, keepalive, the session pool, streams.
+- `docs/ssh/control-sockets.md` -- the control-master protocol and how to test it live.
 
 ## Architecture
 
@@ -132,6 +150,7 @@ connect.
 | `remotefs/` | The local half of a mount: a request multiplexer (`client.go`, portable) and the go-fuse filesystem (`fuse_unix.go`; `fuse_other.go` is a build stub for platforms without FUSE). |
 | `sshutil/` | SSH connect, auth (agent + `~/.ssh` keys), host-key callback, keepalive, command execution. `CommandRunner` runs commands concurrently (bounded) with pre-opened spare sessions. `mux_unix.go` is the other transport: a client for OpenSSH's control-master protocol (`mux_other.go` refuses on non-unix). Both satisfy `Conn`. |
 | `protocol/` | Shared request/response/result structs (JSON-tagged). No logic. |
+| `dats/` | CLI-level test suite (`cli.dats`), run by `go-toolchain` after the build against the staged binary. |
 
 ## Conventions
 
@@ -165,6 +184,18 @@ connect.
   same host share it). `connect` is optional: any command starts a daemon when
   none answers (`client/autostart.go`), which is why the target has to be
   discoverable -- see the next entry.
+- **The port is part of the target, and the target is the identity**
+  (`daemon/target.go`). `[user@]host[:port]` parses everywhere a target is
+  accepted -- CLI, `--target`, `REMOTE_AGENT_TARGET`, every MCP tool's `target`
+  argument -- and `--port` / `REMOTE_AGENT_PORT` fold into it
+  (`client.TargetKey`, `daemon.CanonicalTarget`) before anything hashes it.
+  Without that, several endpoints behind one `root@127.0.0.1` on different
+  ports shared one socket, one target record and one SSH connection, so every
+  call after the first landed on whichever port connected first. Two ports for
+  one target that disagree are an error, never a silent choice. A port
+  `ssh_config` resolves stays out of the identity: the client cannot see it
+  without running `ssh -G`, so folding it in would key the daemon to a socket
+  the caller never waits on.
 - **The daemon starts itself, so the target must survive it.** Socket paths are
   a one-way hash of the target, so `daemon.Start` writes a target record next to
   the socket (`daemon/record.go`) and, unlike the socket and PID files, that

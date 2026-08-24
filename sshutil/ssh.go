@@ -24,22 +24,30 @@ type SSHConfig struct {
 	HostName string
 	User     string
 	Port     int
-	// ControlPath is the control-master socket configured for this host,
-	// already expanded: `ssh -G` resolves ~ and the %r/%h/%p tokens, so it is
-	// a path that can be dialed as-is. Empty when none is configured.
+	// This host's control-master socket, already expanded by `ssh -G`. Empty when there is none.
 	ControlPath string
 }
 
-// sshGCommand builds the `ssh -G <host>` command. It is a test seam so the
-// resolver can be exercised without invoking the real ssh binary.
-var sshGCommand = func(host string) *exec.Cmd { return exec.Command("ssh", "-G", host) }
+// A test seam. The -l and -p arguments matter: ssh expands a ControlPath's %r and
+// %p tokens from them. see docs/ssh/connection.md
+var sshGCommand = func(user, host string, port int) *exec.Cmd {
+	args := []string{"-G"}
+	if port > 0 {
+		args = append(args, "-p", strconv.Itoa(port))
+	}
+	if user != "" {
+		args = append(args, "-l", user)
+	}
+	return exec.Command("ssh", append(args, host)...)
+}
 
 // ResolveSSHConfig runs `ssh -G <host>` and parses the effective hostname, user,
-// and port for the given host (resolving any ~/.ssh/config Host alias). It
+// and port for the given host (resolving any ~/.ssh/config Host alias). user and
+// port are the ones the target named, empty and 0 when it named none. It
 // returns nil if ssh is unavailable or the command fails. Unknown keys and an
 // unparseable port are silently ignored.
-func ResolveSSHConfig(host string) *SSHConfig {
-	out, err := sshGCommand(host).Output()
+func ResolveSSHConfig(user, host string, port int) *SSHConfig {
+	out, err := sshGCommand(user, host, port).Output()
 	if err != nil {
 		slog.Debug("ssh -G failed; skipping ssh config resolution", "host", host, "error", err)
 		return nil
@@ -76,8 +84,7 @@ func ResolveSSHConfig(host string) *SSHConfig {
 type Conn interface {
 	Run(command string) (stdout, stderr []byte, exitCode int, err error)
 	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
-	// StartStream runs a command whose stdin and stdout stay open as a
-	// bidirectional byte stream, for the filesystem mount.
+	// A command whose stdin and stdout stay open as one byte stream, for the mount.
 	StartStream(command string) (io.ReadWriteCloser, error)
 	Close() error
 }
@@ -89,8 +96,7 @@ type ConnResult struct {
 	User        string
 	Host        string
 	Port        int
-	// ControlPath names the control master this rode in on, empty when the
-	// connection was dialed directly.
+	// The control master this rode in on. Empty when the connection was dialed.
 	ControlPath string
 }
 
@@ -99,12 +105,9 @@ type ConnectOptions struct {
 	Host string
 	Port int
 	User string
-	// ControlPath is an OpenSSH control-master socket to run commands
-	// through instead of dialing and authenticating separately. Empty dials.
+	// A control master to run commands through, instead of a second connection. Empty dials.
 	ControlPath string
-	// RequireControl makes an unusable ControlPath an error instead of a
-	// reason to dial: a caller that asked for a specific control socket gets
-	// that socket or a failure, never a silent second connection to the host.
+	// Makes an unusable ControlPath an error. A caller that named one gets it or a failure.
 	RequireControl bool
 }
 
@@ -152,9 +155,7 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		if opts.RequireControl {
 			return nil, fmt.Errorf("control master requested but unusable: %w", err)
 		}
-		// Auto-detected from ssh_config and not answering: dialing is the
-		// right move, but say so -- silently opening a second connection to a
-		// host the user expected to be shared is exactly what confuses them.
+		// Dialing is right here, but a silent second connection is what confuses people.
 		fmt.Fprintf(os.Stderr, "Control socket %s is not answering (%v); connecting directly instead.\n", opts.ControlPath, err)
 	}
 
@@ -175,15 +176,14 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	// An IPv6 literal needs the brackets, and knownhosts records the same form.
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	// Start keepalive. Capture the interval on this (synchronous) goroutine so
-	// the spawned keepAlive goroutine never reads the keepAliveInterval package
-	// var concurrently (tests mutate it).
+	// Read the interval here, not in the goroutine: tests mutate the package var.
 	go keepAlive(client, keepAliveInterval)
 
 	return &ConnResult{
@@ -379,18 +379,8 @@ func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 // keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.
 var keepAliveInterval = 30 * time.Second
 
-// keepAlive pings the remote every interval so idle NAT/firewall state does
-// not drop the connection, and stops as soon as the connection is gone.
-//
-// The ping deliberately does NOT request a reply, and the loop watches
-// client.Wait() rather than relying on SendRequest to report the disconnect.
-// A reply-wanting global request is unusable here: golang.org/x/crypto/ssh
-// (v0.52) drains buffered responses with `select { case <-m.globalResponses:
-// default: }`, and once the connection closes that channel is closed, so the
-// receive is always ready and the drain loop spins forever at 100% CPU
-// instead of returning an error (ssh/mux.go:158). A no-reply ping returns the
-// write error directly, and client.Wait() covers a write that lands in a dead
-// socket's buffer.
+// keepAlive holds idle NAT and firewall state open. The ping must not want a reply:
+// x/crypto v0.52 spins at 100% CPU on one after a disconnect. see docs/ssh/connection.md
 func keepAlive(client *ssh.Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

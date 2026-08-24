@@ -8,27 +8,13 @@ import (
 	"sync"
 )
 
-// MaxPayload caps a single frame's binary payload. It bounds what a peer can
-// make the other end allocate, and sits comfortably above the largest write
-// FUSE will hand us (MaxWrite, 1 MiB).
+// Bounds a peer's allocation, above FUSE's 1 MiB write. see docs/mount/behaviour.md
 const MaxPayload = 8 << 20
 
-// MaxHeader caps the JSON header. Headers are small (a readdir of a huge
-// directory is the largest), so this only exists to stop a corrupt length
-// prefix from allocating wildly.
+// A header is small, so this only stops a corrupt length prefix allocating wildly.
 const MaxHeader = 16 << 20
 
-// A frame is a length-prefixed JSON header followed by a length-prefixed
-// binary payload:
-//
-//	uint32 headerLen | header JSON | uint32 payloadLen | payload
-//
-// Keeping file data out of the JSON matters: base64 would inflate every read
-// and write by a third, and JSON strings cannot carry arbitrary bytes at all.
-
-// Writer serializes frames onto a stream. It is safe for concurrent use --
-// responses are produced by many goroutines on the remote, and requests by
-// many FUSE threads locally, but a frame must reach the wire in one piece.
+// Writer is safe for concurrent use: a frame must reach the wire in one piece.
 type Writer struct {
 	mu sync.Mutex
 	w  io.Writer

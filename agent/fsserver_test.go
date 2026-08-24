@@ -280,8 +280,7 @@ func TestFSServerHandlesConcurrentRequests(t *testing.T) {
 		<-done
 	}()
 
-	// Fire every request before reading any reply: the server must answer
-	// concurrently and tag each reply with its request id.
+	// Every request before any reply: the server answers concurrently and tags each one.
 	w := fswire.NewWriter(clientEnd)
 	for i := 0; i < 20; i++ {
 		req := &fswire.Request{ID: uint64(i + 1), Op: fswire.OpStat, Path: string(rune('a'+i)) + ".txt"}
@@ -319,8 +318,7 @@ func TestFSServerClosesHandlesWhenSessionEnds(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, resp.Handle)
 
-	// Dropping the connection must end the session (and with it the open
-	// handles) rather than leaving files open on the remote forever.
+	// A dropped connection ends the session and its handles, and leaks no open files.
 	clientEnd.Close()
 	<-done
 }

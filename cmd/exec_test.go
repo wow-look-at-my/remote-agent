@@ -96,10 +96,8 @@ func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
 	osExit = func(c int) { called, gotCode = true, c }
 	defer func() { osExit = old }()
 
-	// With flag parsing disabled the "--" separator reaches RunE as a literal
-	// argument. It must not be joined into the remote command string: the exit
-	// code below only comes back as 7 if the remote shell ran `exit 7` rather
-	// than `-- exit 7` (which errors on every shell).
+	// "--" reaches RunE literally and must not join the command: exit 7 comes back
+	// only if the remote ran `exit 7` and not `-- exit 7`.
 	suppressStdout(t, func() {
 		assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
 	})

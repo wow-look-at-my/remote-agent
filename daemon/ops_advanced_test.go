@@ -43,8 +43,7 @@ func TestHandleEditErrorResponse(t *testing.T) {
 
 func TestHandleLs(t *testing.T) {
 	h, mock := newTestHandler()
-	// Non-recursive ls now uses `find -maxdepth 1`, so output is the 6-field
-	// find format: type\tsize\tmode\ttime\tlinktarget\tpath
+	// The 6-field find format: type, size, mode, time, link target, path.
 	output := "f\t100\t644\t1709300000\t\t/tmp/a.txt\nd\t4096\t755\t1709300000\t\t/tmp/subdir\n"
 	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
 
@@ -356,8 +355,7 @@ func TestHandleExecAudit(t *testing.T) {
 	assert.True(t, auditSeen, "expected an exec audit entry, got %v", calls)
 }
 
-// barrierRunner blocks every non-audit command until release is closed, and
-// reports arrivals, so a test can prove two commands run concurrently.
+// Blocks every non-audit command until release closes, to prove two run concurrently.
 type barrierRunner struct {
 	arrived chan string
 	release chan struct{}
@@ -427,9 +425,7 @@ func TestParseLsCommand(t *testing.T) {
 		{"cat /etc/passwd", "", false, false}, // not ls
 		{"", "", false, false},
 		{"lsof", "", false, false}, // not ls
-		// Shell-transformed arguments must fall through to real exec: the
-		// native handler quotes the path literally, so globs/expansions would
-		// silently return an empty listing instead of matching files.
+		// A glob falls through to exec: the handler quotes it and would match nothing.
 		{"ls *.go", "", false, false},
 		{"ls /tmp/*.log", "", false, false},
 		{"ls ?", "", false, false},
@@ -465,8 +461,7 @@ func TestStripTrailingRedirect(t *testing.T) {
 		{"echo 2>&1 hello", "echo 2>&1 hello"}, // not trailing
 		{"2>&1", ""},
 		{"cmd", "cmd"},
-		// With another '>' redirect present, 2>&1 changes what lands in the
-		// file — stripping it would drop stderr from the log. Leave as-is.
+		// Another '>' is present, so 2>&1 fills the log file and must stay.
 		{"make > build.log 2>&1", "make > build.log 2>&1"},
 		{"make >> build.log 2>&1", "make >> build.log 2>&1"},
 		{"a 2>&1 | b 2>&1", "a 2>&1 | b 2>&1"}, // inner 2>&1 contains '>'
@@ -480,8 +475,7 @@ func TestStripTrailingRedirect(t *testing.T) {
 
 func TestHandleExecRewritesLs(t *testing.T) {
 	h, mock := newTestHandler()
-	// When exec "ls /tmp" is called, it should redirect to handleLs
-	// The ls handler will call stat command
+	// exec "ls /tmp" reaches handleLs, which runs the stat command.
 	output := "regular file\t100\t644\t1709300000\t/tmp/a.txt\n"
 	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
 

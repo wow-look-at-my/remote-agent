@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().Bool("json", false, "output as JSON instead of compact text")
-	rootCmd.PersistentFlags().StringP("target", "t", "", "SSH target user@host (starts a daemon for it if none is running)")
+	rootCmd.PersistentFlags().StringP("target", "t", "", "SSH target user@host[:port] (starts a daemon for it if none is running)")
 	rootCmd.PersistentFlags().String("control-path", "", "OpenSSH control-master socket to run through (required once given)")
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		jsonFlag, _ := cmd.Flags().GetBool("json")
@@ -61,7 +61,7 @@ func applyGlobalFlags(args []string) ([]string, error) {
 			client.OutputJSON = v
 		case arg == "--target" || arg == "-t":
 			if len(args) < 2 {
-				return nil, fmt.Errorf("--target needs a value (user@host)")
+				return nil, fmt.Errorf("--target needs a value (user@host[:port])")
 			}
 			client.TargetOverride = args[1]
 			args = args[1:]

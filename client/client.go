@@ -17,9 +17,7 @@ import (
 // OutputJSON controls whether responses are printed as JSON (true) or compact text (false).
 var OutputJSON bool
 
-// SocketOverride, when set, forces all requests to a specific daemon socket path,
-// bypassing socket discovery. Mainly a programmatic seam; the REMOTE_AGENT_SOCKET
-// and REMOTE_AGENT_TARGET environment variables provide the same control.
+// Forces every request to one socket, bypassing discovery. REMOTE_AGENT_SOCKET does the same.
 var SocketOverride string
 
 // sendRequest locates the daemon socket and sends a request to it, starting a
@@ -46,8 +44,7 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 	if startErr != nil {
 		return nil, startErr
 	}
-	// Pin it for the rest of this process, so a long-lived client does not
-	// re-resolve a stale socket path on every later untargeted call.
+	// Pinned, so a long-lived client stops re-resolving on every later untargeted call.
 	resolvedSocket = sockPath
 	return sendRequestTo(sockPath, req)
 }
@@ -61,6 +58,12 @@ func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protoco
 	if route.Target == "" {
 		return sendRequest(req)
 	}
+	// Two ports on one host are two daemons, so resolve the key once and key every lookup on it.
+	key, err := TargetKey(route.Target)
+	if err != nil {
+		return nil, err
+	}
+	route.Target = key
 	if err := checkControlPath(route); err != nil {
 		return nil, err
 	}
@@ -71,7 +74,11 @@ func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protoco
 	if !autoStartEnabled(req.Action) {
 		return nil, err
 	}
-	sockPath, startErr := autoStartDaemon(recordFor(route))
+	rec, recErr := recordFor(route)
+	if recErr != nil {
+		return nil, recErr
+	}
+	sockPath, startErr := autoStartDaemon(rec)
 	if startErr != nil {
 		return nil, startErr
 	}
@@ -116,10 +123,18 @@ func findSocket() (string, error) {
 		return s, nil
 	}
 	if TargetOverride != "" {
-		return daemon.SocketPath(TargetOverride), nil
+		key, err := TargetKey(TargetOverride)
+		if err != nil {
+			return "", err
+		}
+		return daemon.SocketPath(key), nil
 	}
 	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
-		return daemon.SocketPath(t), nil
+		key, err := TargetKey(t)
+		if err != nil {
+			return "", err
+		}
+		return daemon.SocketPath(key), nil
 	}
 
 	pattern := filepath.Join(os.TempDir(), "remote-agent-*.sock")
@@ -131,14 +146,12 @@ func findSocket() (string, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple daemons running (%d sockets found); pass --target user@host, or set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
+		return "", fmt.Errorf("multiple daemons running (%d sockets found); pass --target user@host[:port], or set REMOTE_AGENT_TARGET or REMOTE_AGENT_SOCKET to pick one", len(matches))
 	}
 }
 
-// Call sends an action to the daemon and decodes the response payload into
-// out (which may be nil when only success matters). It is the programmatic
-// counterpart to the printing helpers below: the MCP server needs the
-// structured result, not text on stdout.
+// Call decodes the daemon's payload into out, which may be nil. It is what the MCP
+// server uses: a structured result rather than text on stdout.
 func Call(action string, params map[string]any, out any) error {
 	return CallRoute(protocol.Route{}, action, params, out)
 }
@@ -162,8 +175,7 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 	if out == nil {
 		return nil
 	}
-	// The payload arrives as decoded JSON (map/slice values); round-trip it
-	// into the caller's typed struct rather than hand-asserting every field.
+	// Round-trip the decoded JSON into the caller's struct, rather than assert every field.
 	data, err := json.Marshal(resp.Data)
 	if err != nil {
 		return fmt.Errorf("encode %s result: %w", action, err)
@@ -174,8 +186,7 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 	return nil
 }
 
-// DaemonBackend adapts the daemon client to the Backend interface the MCP
-// server expects, without either package importing the other.
+// DaemonBackend satisfies the MCP server's Backend, so neither package imports the other.
 type DaemonBackend struct{}
 
 // Call implements the MCP server's Backend interface.
@@ -183,8 +194,8 @@ func (DaemonBackend) Call(route protocol.Route, action string, params map[string
 	return CallRoute(route, action, params, out)
 }
 
-// Connect starts the daemon for a target. controlPath, when set, is an
-// OpenSSH control-master socket the daemon must run its commands through.
+// Connect starts a target's daemon. A port folds into the target, and a controlPath
+// names a control master the daemon must run its commands through.
 func Connect(target string, port int, controlPath string) error {
 	return daemon.Start(daemon.StartOptions{
 		Target:      target,
@@ -274,9 +285,7 @@ func Write(path, mode string, content []byte) error {
 		"path": path,
 		"mode": mode,
 	}
-	// Valid UTF-8 travels as a plain string (human-readable in --json). Any
-	// other bytes are base64-framed: encoding/json silently replaces invalid
-	// UTF-8 with U+FFFD, which would corrupt binary payloads on the socket hop.
+	// Other bytes must be base64: encoding/json replaces invalid UTF-8 with U+FFFD.
 	if utf8.Valid(content) {
 		params["content"] = string(content)
 	} else {

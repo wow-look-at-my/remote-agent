@@ -9,22 +9,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// DefaultGlobLimit caps how many paths a glob returns when the caller does
-// not ask for a different limit.
+// Paths returned when the caller asks for no limit.
 const DefaultGlobLimit = 500
 
-// skipDirs are directory names never descended into during a glob or grep
-// walk. They hold machine-generated content that would swamp any result set,
-// and matching inside them is essentially never what a caller wants. A
-// pattern that names one explicitly (e.g. "node_modules/**") still reaches
-// it: the skip only applies to directories the walk discovers on its own.
-var skipDirs = map[string]bool{
-	".git":         true,
-	"node_modules": true,
-}
+// Machine-generated trees the walk never enters. A pattern that names one still reaches it.
+var skipDirs = set.Of(".git", "node_modules")
 
 // GlobOptions configures a glob search.
 type GlobOptions struct {
@@ -75,7 +68,7 @@ func GlobFiles(opts GlobOptions) (*protocol.GlobResult, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && skipDirs[d.Name()] {
+			if p != root && skipDirs.Contains(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -124,15 +117,8 @@ func matchAny(patterns []string, rel string) bool {
 	return false
 }
 
-// matchGlob matches a slash-separated path against a glob pattern with the
-// semantics callers expect from ripgrep/fast-glob rather than Go's plain
-// path.Match:
-//
-//   - "**" matches zero or more path segments ("**/*.go" matches "main.go"
-//     as well as "a/b/main.go");
-//   - "*", "?" and character classes match within a single segment;
-//   - a pattern with no slash at all ("*.go") matches the base name at any
-//     depth, which is how such patterns are almost always meant.
+// matchGlob follows ripgrep semantics, not path.Match: "**" spans segments, "*" and "?"
+// stay inside one, and a pattern with no slash matches the base name at any depth.
 func matchGlob(pattern, name string) bool {
 	if pattern == "" {
 		return false
@@ -170,8 +156,7 @@ func matchSegments(pat, seg []string) bool {
 	return len(seg) == 0
 }
 
-// segmentMatch matches one path segment. A malformed pattern (path.Match's
-// only error) matches nothing rather than failing the whole walk.
+// One segment. A malformed pattern matches nothing, and never fails the walk.
 func segmentMatch(pattern, name string) bool {
 	ok, err := path.Match(pattern, name)
 	return err == nil && ok

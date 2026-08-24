@@ -42,9 +42,7 @@ type Daemon struct {
 	streamFunc   streamStarter  // test seam for opening a mount's transport
 }
 
-// opStart records that a client request began handling. The idle watchdog
-// never shuts the daemon down while operations are in flight, no matter how
-// long they run.
+// opStart records that a request began. The watchdog never fires mid-operation.
 func (d *Daemon) opStart() {
 	d.mu.Lock()
 	d.activeOps++
@@ -52,9 +50,7 @@ func (d *Daemon) opStart() {
 	d.mu.Unlock()
 }
 
-// opEnd records that a client request finished. It also refreshes
-// lastActivity so the idle countdown starts at completion, not at the start
-// of a long-running command.
+// opEnd records that a request finished; the idle countdown starts here, not at its start.
 func (d *Daemon) opEnd() {
 	d.mu.Lock()
 	d.activeOps--
@@ -62,12 +58,8 @@ func (d *Daemon) opEnd() {
 	d.mu.Unlock()
 }
 
-// auditAsync writes an audit entry on the remote without blocking the
-// operation it describes: the audit command runs on its own SSH channel,
-// concurrently with the operation. This halves the network round trips per
-// operation compared to running the audit serially first. shutdown drains
-// in-flight audits via auditWG, so a graceful shutdown never loses entries.
-// Audit failures are ignored, exactly as they were when the call was serial.
+// auditAsync audits on its own SSH channel, so the operation does not wait for it.
+// Failures are ignored; shutdown drains what is in flight. see docs/daemon/lifecycle.md
 func (d *Daemon) auditAsync(action, detail string) {
 	cmd := fmt.Sprintf("%s serve audit --action %s --detail %s",
 		d.remotePath, shellEscape(action), shellEscape(detail))
@@ -78,70 +70,68 @@ func (d *Daemon) auditAsync(action, detail string) {
 	}()
 }
 
-// SocketPath returns the Unix socket path for a given host.
+// SocketPath is the socket for a target, canonicalized first so each port keys its own daemon.
 func SocketPath(target string) string {
-	h := sha256.Sum256([]byte(target))
+	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.sock", h[:6]))
 }
 
-// PIDPath returns the PID file path for a given host.
+// PIDPath returns the PID file path for a given target.
 func PIDPath(target string) string {
-	h := sha256.Sum256([]byte(target))
+	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.pid", h[:6]))
 }
 
 // StartOptions configures a daemon.
 type StartOptions struct {
-	Target string // user@host, or a ~/.ssh/config Host alias
-	Port   int    // SSH port; 0 means the configured or default port
-	// ControlPath is an OpenSSH control-master socket to run commands
-	// through. Naming one here makes it mandatory: the daemon fails rather
-	// than quietly opening its own connection to the host. Left empty, the
-	// control socket ssh_config configures for the host is used when a master
-	// is answering on it.
+	Target string // [user@]host[:port], or a ~/.ssh/config Host alias
+	// Port joins the identity like a port in the target; disagreeing ports error. 0 = ssh_config, else 22.
+	Port int
+	// ControlPath makes that master mandatory. Empty uses ssh_config's, when one answers.
 	ControlPath string
 }
 
 // Start connects to the remote, deploys the helper binary, and starts the daemon.
 func Start(opts StartOptions) error {
-	target, port := opts.Target, opts.Port
-
-	// Parse user@host
-	user, host, err := parseTarget(target)
+	// The port keys the daemon, whether it came in the target or beside it.
+	target, err := CanonicalTarget(opts.Target, opts.Port)
 	if err != nil {
 		return err
 	}
+	ep, err := ParseTarget(target)
+	if err != nil {
+		return err
+	}
+	user, host, port := ep.Login(), ep.Host, ep.Port
 
-	// Auto-connect: if a daemon for this target is already up and answering,
-	// reuse it rather than dialing/deploying a second time.
+	// A daemon already answering for this target is reused, not rebuilt.
 	sockPath := SocketPath(target)
 	if pingSocket(sockPath) {
 		fmt.Fprintf(os.Stderr, "Already connected to %s\n", target)
 		return nil
 	}
 
-	// Resolve any ~/.ssh/config Host alias to its real hostname/user/port via
-	// `ssh -G`, so a bare alias like "myserver" connects to the configured host.
-	// Only fill in values the caller did not supply explicitly.
-	// A control path named by the caller is a requirement, not a hint: the
-	// point of asking for one is not opening a second connection to the host.
+	// ssh -G fills in only what the caller left out. see docs/daemon/lifecycle.md
 	controlPath, requireControl := opts.ControlPath, opts.ControlPath != ""
-	if cfg := sshutil.ResolveSSHConfig(host); cfg != nil {
+	if cfg := sshutil.ResolveSSHConfig(ep.User, host, port); cfg != nil {
 		if cfg.HostName != "" {
 			host = cfg.HostName
 		}
-		if cfg.User != "" && !strings.Contains(target, "@") { // only when user wasn't explicitly given
+		if cfg.User != "" && ep.User == "" { // only when user wasn't explicitly given
 			user = cfg.User
 		}
-		if cfg.Port != 0 && port == 22 { // only override the default port
+		if cfg.Port != 0 && port == 0 { // only when the target names no port
 			port = cfg.Port
 		}
 		if controlPath == "" {
 			controlPath = cfg.ControlPath
 		}
 	}
+	if port == 0 {
+		port = defaultSSHPort
+	}
 
-	fmt.Fprintf(os.Stderr, "Connecting to %s@%s:%d...\n", user, host, port)
+	fmt.Fprintf(os.Stderr, "Connecting to %s@%s...\n", user, net.JoinHostPort(host, strconv.Itoa(port)))
 
 	conn, err := sshutil.Connect(sshutil.ConnectOptions{
 		Host:           host,
@@ -175,10 +165,7 @@ func Start(opts StartOptions) error {
 		fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
 	}
 
-	// Run startup audit
-	// Through a control master there is no key of ours to name, so the audit
-	// entry records which master vouched for the connection instead of
-	// leaving the field blank and implying an unauthenticated one.
+	// Through a master there is no key of ours, so the entry names the master instead.
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s --detail %s",
 		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
 	runner.Run(auditCmd)
@@ -207,11 +194,8 @@ func Start(opts StartOptions) error {
 	// Write PID file
 	os.WriteFile(d.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 
-	// Remember the target this socket belongs to and how it was reached, so a
-	// later command can restart the daemon itself instead of erroring out --
-	// through the same control master, if that is how this one connected.
-	// Kept on shutdown.
-	WriteTargetRecord(TargetRecord{Target: target, Port: port, ControlPath: conn.ControlPath})
+	// Kept on shutdown, and Port holds no ssh_config port. see docs/daemon/lifecycle.md
+	WriteTargetRecord(TargetRecord{Target: target, Port: ep.Port, ControlPath: conn.ControlPath})
 
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
 	fmt.Fprintf(os.Stderr, "Ready.\n")
@@ -273,8 +257,7 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		return
 	}
 
-	// Track the request so the idle watchdog neither fires mid-operation nor
-	// counts a long-running command's duration as idle time.
+	// Held so the watchdog neither fires mid-operation nor counts the command as idle.
 	d.opStart()
 	defer d.opEnd()
 
@@ -293,9 +276,7 @@ func (d *Daemon) watchIdle() {
 		idle := time.Since(d.lastActivity)
 		busy := d.activeOps > 0
 		d.mu.Unlock()
-		// A live mount is state the user is relying on: unmounting it because
-		// nobody ran a command for a while would break every process with a
-		// file open under it, so mounts hold the daemon open.
+		// A live mount holds the daemon open: dropping it breaks every open file under it.
 		if !busy && !d.hasMounts() && idle > idleTimeout {
 			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
 			d.shutdown()
@@ -306,22 +287,17 @@ func (d *Daemon) watchIdle() {
 }
 
 func (d *Daemon) shutdown() {
-	// Detach mounts first: they run over the SSH connection this is about to
-	// close, and a mountpoint whose backing connection is gone hangs every
-	// process that touches it.
+	// Mounts go first: a mount whose connection died hangs every caller.
 	d.unmountAll()
 
-	// Drain in-flight async audit writes before the shutdown audit/cleanup so
-	// no entries are lost and the shutdown entry stays last.
+	// Drain audits so none are lost and the shutdown entry stays last.
 	d.auditWG.Wait()
 
 	if d.runner != nil {
-		// Send shutdown audit to remote
 		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
 		d.runner.Run(auditCmd)
 
-		// Delete the remote binary, unless it lives in the content-addressed
-		// cache dir — then it stays for the next connect to reuse.
+		// A cached helper stays for the next connect to reuse.
 		if !d.keepBinary {
 			d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
 		}
@@ -331,10 +307,7 @@ func (d *Daemon) shutdown() {
 }
 
 func (d *Daemon) cleanup() {
-	// Remove the files before closing the listener: closing it unblocks the
-	// accept loop, whose return exits the process, and that race left the PID
-	// file behind on every clean disconnect. The target record is kept -- it is
-	// what lets the next command start a daemon without being told the target.
+	// Files first: closing the listener exits the process. see docs/daemon/lifecycle.md
 	os.Remove(d.sockPath)
 	os.Remove(d.pidPath)
 	if d.listener != nil {
@@ -354,11 +327,8 @@ func connectionDetail(conn *sshutil.ConnResult) string {
 	return "connected directly over ssh"
 }
 
-// deployBinary ships the helper binary to the remote and returns its path.
-// reused reports that an identical cached binary was already present and no
-// upload happened.
+// deployBinary ships the helper to the remote. reused means a cached copy was already there.
 func deployBinary(runner Runner) (remotePath string, reused bool, err error) {
-	// Find the binary to deploy
 	localBinary, err := findDeployBinary()
 	if err != nil {
 		return "", false, err
@@ -372,13 +342,7 @@ func deployBinary(runner Runner) (remotePath string, reused bool, err error) {
 	return deployBinaryData(runner, data)
 }
 
-// deployBinaryData deploys the given helper binary bytes. The remote path is
-// content-addressed (sha256 of the binary) under ~/.cache/remote-agent, so a
-// reconnect finds the identical binary already in place and skips uploading
-// the multi-megabyte payload entirely. The cache lives under $HOME rather
-// than world-writable /tmp so no other user can pre-plant or swap the file,
-// and uploads go through a unique temp path plus rename so a concurrent
-// connect can never observe a partial binary.
+// deployBinaryData uploads the helper, content-addressed. see docs/daemon/lifecycle.md
 func deployBinaryData(runner Runner, data []byte) (remotePath string, reused bool, err error) {
 	sum := sha256.Sum256(data)
 
@@ -395,8 +359,7 @@ func deployBinaryData(runner Runner, data []byte) (remotePath string, reused boo
 			return remotePath, true, nil
 		}
 	} else {
-		// No usable $HOME (or probe failed): fall back to a random /tmp path.
-		// It is removed again on disconnect (keepBinary stays false).
+		// No usable $HOME: a random /tmp path, removed again on disconnect.
 		remotePath = fmt.Sprintf("/tmp/.remote-agent-%s", randomSuffix())
 	}
 
@@ -417,9 +380,7 @@ func deployBinaryData(runner Runner, data []byte) (remotePath string, reused boo
 	return remotePath, false, nil
 }
 
-// cachedDeploy reports whether remotePath lives in the persistent helper
-// cache (as opposed to a throwaway /tmp path), in which case disconnect
-// leaves it in place for the next connect to reuse.
+// A helper in the persistent cache, not on a throwaway path, survives disconnect.
 func cachedDeploy(remotePath string) bool {
 	return strings.Contains(remotePath, "/.cache/remote-agent/")
 }
@@ -446,18 +407,6 @@ func findDeployBinary() (string, error) {
 	}
 
 	return "", fmt.Errorf("no suitable binary found for linux/amd64; build with: make build-linux")
-}
-
-func parseTarget(target string) (user, host string, err error) {
-	if user, host, found := strings.Cut(target, "@"); found {
-		return user, host, nil
-	}
-	// No user specified — fall back to $USER, then root.
-	currentUser := os.Getenv("USER")
-	if currentUser == "" {
-		currentUser = "root"
-	}
-	return currentUser, target, nil
 }
 
 func shellEscape(s string) string {

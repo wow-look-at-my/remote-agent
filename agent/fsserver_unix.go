@@ -15,11 +15,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// fsMaxInFlight bounds how many filesystem operations the helper services at
-// once. Requests are answered concurrently -- a multi-megabyte read must not
-// stall the stat calls a directory walk is issuing behind it -- but an
-// unbounded fan-out would let a busy mount exhaust the remote's file
-// descriptors or memory.
+// Concurrent, so a large read never stalls the stats behind it. Bounded, so nothing runs out.
 const fsMaxInFlight = 32
 
 // ServeFS runs the remote half of a mount: it reads filesystem requests from
@@ -61,8 +57,7 @@ func ServeFS(root string, in io.Reader, out io.Writer) error {
 			defer wg.Done()
 			defer func() { <-server.sem }()
 			resp, data := server.handle(&req, payload)
-			// A write failure means the client is gone; the read loop will
-			// see EOF and shut everything down.
+			// A write failure means the client is gone, and the read loop sees EOF.
 			_ = server.writer.WriteFrame(resp, data)
 		}()
 	}
@@ -110,11 +105,7 @@ func (s *fsServer) handle(req *fswire.Request, payload []byte) (*fswire.Response
 		}
 		resp.Target = target
 	case fswire.OpOpen, fswire.OpCreate:
-		// O_APPEND is deliberately dropped. Every read and write here carries
-		// an explicit offset (the kernel resolves append offsets before it
-		// sends the request), and pwrite on an O_APPEND descriptor ignores
-		// that offset and writes at the end of the file instead -- Go rejects
-		// the combination outright, which surfaced as EIO on every append.
+		// O_APPEND goes: pwrite ignores an offset on it. see docs/mount/behaviour.md
 		flags := fswire.LocalOpenFlags(req.Flags) &^ os.O_APPEND
 		if req.Op == fswire.OpCreate {
 			flags |= os.O_CREATE

@@ -219,9 +219,7 @@ func TestHandleWriteError(t *testing.T) {
 
 func TestHandleWriteStreamsViaStdin(t *testing.T) {
 	h, mock := newTestHandler()
-	// 300 KiB payload: embedding this in the command line (as the old
-	// echo|base64 -d approach did) exceeds the kernel's 128 KiB per-argument
-	// cap (MAX_ARG_STRLEN) and fails with "Argument list too long".
+	// 300 KiB, which is past the kernel's 128 KiB per-argument cap.
 	content := strings.Repeat("x", 300*1024)
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/big.bin", "content": content})

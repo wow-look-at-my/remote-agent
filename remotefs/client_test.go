@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
@@ -87,8 +88,7 @@ func TestClientReportsRemoteErrno(t *testing.T) {
 	c := New(clientEnd, clientEnd, clientEnd)
 	defer c.Close()
 
-	// An errno is data, not a transport failure: Call succeeds and the caller
-	// inspects Errno.
+	// An errno is data, not a transport failure, so Call succeeds and the caller reads it.
 	resp, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(2), resp.Errno)
@@ -99,8 +99,7 @@ func TestClientFailsCallsAfterSessionEnds(t *testing.T) {
 	clientEnd, serverEnd := net.Pipe()
 	c := New(clientEnd, clientEnd, clientEnd)
 
-	// A call in flight when the connection dies must fail, not hang: FUSE
-	// threads blocked forever would wedge every process touching the mount.
+	// A dead connection must fail an in-flight call. A blocked FUSE thread wedges the mount.
 	inFlight := make(chan error, 1)
 	go func() {
 		_, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
@@ -170,17 +169,15 @@ func TestClientAssignsUniqueIDs(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	seen := map[uint64]bool{}
+	seen := set.New[uint64]()
 	for i := 0; i < 4; i++ {
 		id := <-ids
-		assert.False(t, seen[id], "request ids must be unique")
-		seen[id] = true
+		assert.True(t, seen.Add(id), "request ids must be unique")
 	}
 }
 
 func TestClientWriteFailureIsReported(t *testing.T) {
-	// A stream that rejects writes (a closed SSH channel) must surface as an
-	// error rather than a lost request.
+	// A stream that rejects writes, a closed SSH channel, is an error and not a lost request.
 	c := New(brokenWriter{}, io.LimitReader(nil, 0), nil)
 	_, _, err := c.Call(&fswire.Request{Op: fswire.OpPing}, nil)
 	assert.Error(t, err)

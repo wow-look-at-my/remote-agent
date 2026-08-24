@@ -17,8 +17,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// mockRemoteHome is the working directory the mock daemon reports for the
-// remote host, which is what the launcher mounts by default.
+// What the mock daemon reports as the remote working directory, so the launcher mounts it.
 const mockRemoteHome = "/remote/home"
 
 // mockDaemonCalls records the mount traffic a launch generates.
@@ -255,8 +254,7 @@ func TestLaunchClaudeReusesExistingDaemon(t *testing.T) {
 	assert.Equal(t, []string{"--model", "opus"}, gotArgs,
 		"a mounted session must not touch claude's tool configuration")
 
-	// The remote home is mounted at the identical local path, and claude runs
-	// there, so file tools and shell commands agree on what a path means.
+	// One path, both halves: the mount point equals the remote home, and claude runs there.
 	calls := mockDaemonCalls.snapshot()
 	require.NotEmpty(t, calls)
 	assert.Equal(t, mountCall{Action: "mount", Local: mockRemoteHome, Remote: mockRemoteHome}, calls[0])
@@ -398,8 +396,7 @@ func TestLaunchClaudeNoMountFallsBackToRemoteTools(t *testing.T) {
 		assert.Contains(t, arg, "=", "remote toolset flags must bind their value with '='")
 	}
 
-	// The MCP config points claude at this binary's `mcp` subcommand, pinned
-	// to the daemon socket for this launch.
+	// The config points claude at this binary's `mcp`, pinned to this launch's socket.
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	var config struct {
@@ -414,8 +411,7 @@ func TestLaunchClaudeNoMountFallsBackToRemoteTools(t *testing.T) {
 	server, ok := config.MCPServers[mcpServerName]
 	require.True(t, ok, "config should define the %q server", mcpServerName)
 	assert.Equal(t, "stdio", server.Type)
-	// The target rides in the argv, so the server can bring a daemon back up
-	// after this one idles out instead of failing every tool call.
+	// The target rides in the argv, so the server can restart a daemon that idles out.
 	assert.Equal(t, []string{"mcp", "root@nomount-host"}, server.Args)
 	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
 	assert.Equal(t, "root@nomount-host", server.Env["REMOTE_AGENT_TARGET"])
@@ -478,8 +474,7 @@ func TestLaunchClaudeMountAt(t *testing.T) {
 	assert.Equal(t, mountCall{Action: "mount", Local: mountAt, Remote: "/srv/app"}, calls[0])
 	assert.Equal(t, mountAt, gotDir)
 
-	// Paths differ between the two halves, so the shim must NOT cd forwarded
-	// commands into a local path the remote does not have.
+	// The two halves disagree on paths, so the shim must not cd into a local one.
 	env := map[string]string{}
 	for _, e := range gotEnv {
 		k, v, _ := splitEnv(e)

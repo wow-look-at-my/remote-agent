@@ -10,38 +10,30 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/wow-look-at-my/go-containers/set"
 	"github.com/wow-look-at-my/remote-agent/daemon"
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// TargetOverride, when set, names the SSH target commands act on (the --target
-// flag). It selects the daemon socket and, when no daemon is running, is the
-// target a fresh one is started for.
+// TargetOverride is the --target flag: it selects the socket, and names the target a fresh daemon starts for.
 var TargetOverride string
 
-// ControlPathOverride, when set, is the OpenSSH control-master socket a daemon
-// this process starts must run through (the --control-path flag).
+// ControlPathOverride is the --control-path flag: the master a daemon this process starts must run through.
 var ControlPathOverride string
 
-// resolvedSocket is the socket of a daemon this process started for the
-// process-wide target; it wins over discovery for the remainder of the process.
-// Calls that name their own target never consult it -- see sendRequestFor.
+// Socket of a daemon this process started. It beats discovery, but never a call that names its own target.
 var resolvedSocket string
 
-// errNoDaemon marks the failures auto-start can repair: no socket at all, or a
-// socket nothing is listening on. Request-level failures do not match it, so a
-// broken command never causes a reconnect.
+// The two failures auto-start repairs. A request-level failure never matches, so it never reconnects.
 var errNoDaemon = errors.New("no daemon running")
 
-// autoStartExempt are actions that must not bring a daemon up. Connecting in
-// order to disconnect is absurd, and ping is how callers ask whether a daemon
-// is there at all.
-var autoStartExempt = map[string]bool{"disconnect": true, "ping": true}
+// Actions that must not bring a daemon up: one disconnects, the other asks whether a daemon is there.
+var autoStartExempt = set.Of("disconnect", "ping")
 
 // autoStartEnabled reports whether this process may start daemons.
 // REMOTE_AGENT_NO_AUTOSTART=1 turns it off.
 func autoStartEnabled(action string) bool {
-	if autoStartExempt[action] {
+	if autoStartExempt.Contains(action) {
 		return false
 	}
 	return os.Getenv("REMOTE_AGENT_NO_AUTOSTART") == ""
@@ -57,71 +49,95 @@ func resolveTarget() (daemon.TargetRecord, error) {
 		explicit = os.Getenv("REMOTE_AGENT_TARGET")
 	}
 	if explicit != "" {
-		return recordFor(protocol.Route{Target: explicit}), nil
+		return recordFor(protocol.Route{Target: explicit})
 	}
 
 	recs := daemon.ListTargetRecords()
 	switch len(recs) {
 	case 0:
-		return daemon.TargetRecord{}, errors.New("no target known: pass --target user@host or set REMOTE_AGENT_TARGET")
+		return daemon.TargetRecord{}, errors.New("no target known: pass --target user@host[:port] or set REMOTE_AGENT_TARGET")
 	case 1:
-		return recordFor(protocol.Route{Target: recs[0].Target}), nil
+		return recordFor(protocol.Route{Target: recs[0].Target})
 	default:
 		names := make([]string, 0, len(recs))
 		for _, r := range recs {
 			names = append(names, r.Target)
 		}
 		sort.Strings(names)
-		return daemon.TargetRecord{}, fmt.Errorf("several targets known (%v): pass --target user@host or set REMOTE_AGENT_TARGET", names)
+		return daemon.TargetRecord{}, fmt.Errorf("several targets known (%v): pass --target user@host[:port] or set REMOTE_AGENT_TARGET", names)
 	}
 }
 
-const defaultPort = 22
+// TargetKey folds REMOTE_AGENT_PORT into a target. see docs/daemon/lifecycle.md
+func TargetKey(target string) (string, error) {
+	return targetKey(target, 0)
+}
 
-// DefaultTarget reports the target this process was pointed at, if any: the
-// --target flag, REMOTE_AGENT_TARGET, or the target recorded for a pinned
-// REMOTE_AGENT_SOCKET. Callers that route per request (the MCP server) use it
-// as the fallback for requests that name no target of their own; an empty
-// result means the request has to carry one.
-func DefaultTarget() string {
+// targetKey folds a port given separately, then REMOTE_AGENT_PORT, into a
+// target. An empty target stays empty: it names no endpoint to key on.
+func targetKey(target string, port int) (string, error) {
+	if target == "" {
+		return "", nil
+	}
+	if port == 0 {
+		if p, ok := portFromEnv(); ok {
+			port = p
+		}
+	}
+	return daemon.CanonicalTarget(target, port)
+}
+
+// DefaultTarget reports the target this process was pointed at: --target,
+// REMOTE_AGENT_TARGET, or the record for a pinned socket. Empty means a call must carry one.
+func DefaultTarget() (string, error) {
 	if TargetOverride != "" {
-		return TargetOverride
+		return TargetKey(TargetOverride)
 	}
 	if t := os.Getenv("REMOTE_AGENT_TARGET"); t != "" {
-		return t
+		return TargetKey(t)
 	}
 	if sock := os.Getenv("REMOTE_AGENT_SOCKET"); sock != "" {
 		if rec, err := daemon.TargetForSocket(sock); err == nil {
-			return rec.Target
+			return rec.Target, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
-// recordFor describes the daemon to start for a route. A record for this exact
-// target carries the port it was last reached on and the control master it
-// rode, if any; REMOTE_AGENT_PORT and the route's own control path win.
-func recordFor(route protocol.Route) daemon.TargetRecord {
-	rec := daemon.TargetRecord{Target: route.Target, Port: defaultPort}
-	if prev, err := daemon.ReadTargetRecord(daemon.TargetPath(route.Target)); err == nil {
-		if prev.Port != 0 {
-			rec.Port = prev.Port
-		}
-		rec.ControlPath = prev.ControlPath
+// recordFor describes the daemon to start for a route. The record is named
+// from the canonical target, so the socket it waits on is the socket the
+// daemon opens. A record for that target carries the control master it rode,
+// if any; the route's own control path wins.
+func recordFor(route protocol.Route) (daemon.TargetRecord, error) {
+	key, err := targetKey(route.Target, 0)
+	if err != nil {
+		return daemon.TargetRecord{}, err
 	}
-	if p, ok := portFromEnv(); ok {
-		rec.Port = p
+	prev, prevErr := daemon.ReadTargetRecord(daemon.TargetPath(key))
+	ep, err := daemon.ParseTarget(key)
+	if err != nil {
+		return daemon.TargetRecord{}, err
+	}
+	// An older record keeps its port in a field of its own. Without this, a restart reaches port 22.
+	if ep.Port == 0 && prevErr == nil && prev.Port > 0 {
+		if key, err = daemon.CanonicalTarget(key, prev.Port); err != nil {
+			return daemon.TargetRecord{}, err
+		}
+		ep.Port = prev.Port
+	}
+
+	rec := daemon.TargetRecord{Target: key, Port: ep.Port}
+	if prevErr == nil {
+		rec.ControlPath = prev.ControlPath
 	}
 	if cp := ControlPathFor(route); cp != "" {
 		rec.ControlPath = cp
 	}
-	return rec
+	return rec, nil
 }
 
-// ControlPathFor resolves the control-master socket a route should use: the
-// one the call named, else the process-wide --control-path flag, else
-// REMOTE_AGENT_CONTROL_PATH. Empty means "whatever ssh_config configures for
-// the host", which the daemon resolves and treats as optional.
+// ControlPathFor resolves a route's control master: the call's own, else --control-path,
+// else REMOTE_AGENT_CONTROL_PATH. Empty leaves it to ssh_config, where it is optional.
 func ControlPathFor(route protocol.Route) string {
 	if route.ControlPath != "" {
 		return route.ControlPath
@@ -153,9 +169,7 @@ func checkControlPath(route protocol.Route) error {
 		route.Target, via, want, route.Target)
 }
 
-// socketAnswers reports whether anything is listening on a daemon socket. It
-// only connects: a request would run a command on the remote, which is far too
-// much work for a liveness question asked before every routed call.
+// Only connects: a request runs a remote command, which is far too much for a liveness check.
 func socketAnswers(sockPath string) bool {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -165,9 +179,7 @@ func socketAnswers(sockPath string) bool {
 	return true
 }
 
-// startMu serializes auto-starts within this process. One MCP server can be
-// asked for several targets at once, and two `connect` processes racing for the
-// same socket leaves one of them dead on "address already in use".
+// Two connects racing for one socket leave one dead on "address already in use".
 var startMu sync.Mutex
 
 // autoStartDaemon starts a daemon for rec in the background and waits for it to
@@ -199,9 +211,8 @@ func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	return sockPath, nil
 }
 
-// portFromEnv reads an SSH port from REMOTE_AGENT_PORT, reporting whether one
-// was set. Host aliases in ~/.ssh/config carry their own port, resolved when
-// the daemon connects, so this is only for targets given as bare host names.
+// portFromEnv reads REMOTE_AGENT_PORT. A ~/.ssh/config alias carries its own port,
+// resolved when the daemon connects, so this is only for a bare host name.
 func portFromEnv() (int, bool) {
 	s := os.Getenv("REMOTE_AGENT_PORT")
 	if s == "" {

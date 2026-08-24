@@ -12,13 +12,9 @@ func localShellPath() string {
 	return "/bin/sh"
 }
 
-// runLocal executes command locally via `/bin/sh -c`, replacing this process
-// with exec(2). That reproduces exactly what Claude Code did before v2.1.185
-// wrapped hooks with the shell prefix (a bare `/bin/sh -c '<cmd>'` spawn):
-// same process depth, same inherited env and stdio, same signal delivery --
-// which matters for long-lived MCP stdio servers that Claude manages by pid.
-// On success it never returns; if exec(2) itself fails it falls back to
-// running the command as a child process.
+// runLocal replaces this process with `/bin/sh -c` through exec(2), which keeps the
+// process depth, environment, stdio and signals Claude expects for an MCP server it
+// manages by pid. A failed exec falls back to a child process.
 func runLocal(command string) (int, error) {
 	shell := localShellPath()
 	// exec(2) only ever returns on failure.

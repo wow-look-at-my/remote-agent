@@ -8,21 +8,14 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// spareTarget is how many pre-opened sessions the runner keeps warm. Two
-// covers the daemon's steady state: each operation consumes one session for
-// the command itself and one for its concurrent audit write.
+// Two spares cover the steady state: one session per command, one per audit write.
 const spareTarget = 2
 
-// maxConcurrentSessions bounds how many commands run at once. Together with
-// the spare pool this stays within OpenSSH's default MaxSessions of 10
-// channels per connection (8 running + 2 spares).
+// 8 running plus 2 spares stays inside OpenSSH's default MaxSessions of 10.
 const maxConcurrentSessions = 8
 
-// CommandRunner executes commands over a persistent SSH connection. It keeps
-// a small pool of pre-opened sessions warm: opening a session costs a full
-// network round trip (SSH_MSG_CHANNEL_OPEN -> CONFIRMATION), so opening the
-// next sessions in the background while the current command runs removes that
-// round trip from every command's latency.
+// CommandRunner keeps sessions pre-opened, because opening one costs a round trip
+// that would otherwise sit in every command's latency. see docs/ssh/connection.md
 type CommandRunner struct {
 	client  *ssh.Client
 	sem     chan struct{} // bounds concurrently running commands
@@ -32,10 +25,8 @@ type CommandRunner struct {
 	closed  bool           // stop replenishing spares
 }
 
-// NewCommandRunner returns a runner for the given SSH client and starts
-// pre-opening sessions immediately. Run and RunStdin are safe for concurrent
-// use: SSH multiplexes each command onto its own channel, and the runner
-// bounds in-flight commands at maxConcurrentSessions.
+// NewCommandRunner starts pre-opening sessions at once. Run and RunStdin are
+// safe for concurrent use, bounded at maxConcurrentSessions.
 func NewCommandRunner(client *ssh.Client) *CommandRunner {
 	r := &CommandRunner{
 		client: client,
@@ -69,9 +60,7 @@ func (r *CommandRunner) run(command string, stdin []byte) (stdout, stderr []byte
 	stdout, stderr, exitCode, started, err := execOnSession(sess, command, stdin)
 	sess.Close()
 	if !started && fromSpare {
-		// The pre-opened session went stale before the exec request was
-		// accepted (the command never began), so a retry is safe. Use a fresh
-		// session; if the connection itself is down this fails too.
+		// The spare went stale before the exec, so the command never began and a retry is safe.
 		fresh, ferr := r.client.NewSession()
 		if ferr != nil {
 			return nil, nil, -1, err
@@ -138,9 +127,7 @@ func (r *CommandRunner) prewarmAsync() {
 	}()
 }
 
-// Close releases the pre-opened spare sessions and stops replenishing them.
-// The underlying SSH client is not closed, and Run/RunStdin still work
-// afterwards (they fall back to opening sessions on demand).
+// Close releases the spares. The SSH client stays open, and Run still opens sessions on demand.
 func (r *CommandRunner) Close() {
 	r.mu.Lock()
 	spares := r.spares
