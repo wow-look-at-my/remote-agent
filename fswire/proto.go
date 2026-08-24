@@ -49,9 +49,7 @@ type Request struct {
 	Mode   uint32 `json:"mode,omitempty"`
 	Dev    uint32 `json:"dev,omitempty"`
 
-	// Setattr fields are pointers so "not requested" is distinguishable from
-	// "set to zero" -- truncating to 0 and leaving the size alone are
-	// different operations.
+	// Pointers, so "not requested" differs from "set to zero": truncating is not leaving alone.
 	SetMode  *uint32 `json:"set_mode,omitempty"`
 	SetUID   *uint32 `json:"set_uid,omitempty"`
 	SetGID   *uint32 `json:"set_gid,omitempty"`
@@ -96,9 +94,7 @@ type Attr struct {
 	Ctime   Time   `json:"ctime"`
 }
 
-// DirEntry is one readdir result. Attr is filled in so a directory listing
-// answers the stat calls that follow it without extra round trips -- the
-// difference between `ls -l` costing one request and costing one per file.
+// One readdir result. Attr is filled in, so `ls -l` costs one request and not one per file.
 type DirEntry struct {
 	Name string `json:"name"`
 	Mode uint32 `json:"mode"` // file type bits, as returned by readdir

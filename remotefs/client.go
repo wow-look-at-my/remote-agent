@@ -19,20 +19,14 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// PingTimeout bounds the handshake with the remote helper. Ordinary
-// filesystem calls are deliberately unbounded (a large read over a slow link
-// legitimately takes a while), but the handshake must not be: a helper that
-// accepts the stream and never answers would otherwise hang the mount request
-// -- and the caller waiting on it -- forever. Overridable in tests.
+// The handshake is the one bounded call: an unanswering helper would hang the mount forever.
 var PingTimeout = 10 * time.Second
 
 // ErrClosed is returned once the session to the remote helper has ended.
 var ErrClosed = errors.New("remote filesystem session is closed")
 
-// Client multiplexes filesystem requests to the remote helper over a single
-// stream. Calls from many FUSE threads are in flight at once and replies
-// arrive in whatever order the remote finishes them, so each is matched back
-// to its caller by request ID.
+// Client multiplexes many FUSE threads onto one stream. Replies arrive in any order,
+// so a request ID matches each one back to its caller.
 type Client struct {
 	writer *fswire.Writer
 	closer io.Closer
@@ -179,8 +173,7 @@ func (c *Client) Ping() error {
 		}
 		return nil
 	case <-time.After(PingTimeout):
-		// The waiting goroutine is released when the caller closes the client,
-		// which is what every failed-handshake path does.
+		// The client close every failed handshake performs releases the waiting goroutine.
 		return fmt.Errorf("no response from the remote filesystem helper after %s", PingTimeout)
 	}
 }

@@ -59,8 +59,7 @@ func TestFrameRejectsOversizedPayload(t *testing.T) {
 }
 
 func TestFrameRejectsImplausibleLengths(t *testing.T) {
-	// A corrupt length prefix must be refused, not turned into a giant
-	// allocation.
+	// A corrupt length prefix is refused, never turned into a giant allocation.
 	var buf bytes.Buffer
 	binary.Write(&buf, binary.BigEndian, uint32(MaxHeader+1))
 	_, err := NewReader(&buf).ReadFrame(&Request{})
@@ -100,8 +99,7 @@ func TestFrameRejectsBadJSON(t *testing.T) {
 }
 
 func TestWriterIsConcurrencySafe(t *testing.T) {
-	// Frames from many goroutines must not interleave: the remote answers
-	// requests concurrently onto one stream.
+	// The remote answers concurrently onto one stream, so frames must not interleave.
 	var buf syncBuffer
 	w := NewWriter(&buf)
 

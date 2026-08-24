@@ -42,8 +42,7 @@ func startFakeMaster(t *testing.T, m *fakeMaster) *fakeMaster {
 	if m.helloVersion == 0 {
 		m.helloVersion = muxVersion
 	}
-	// Socket paths are capped near 100 bytes, and t.TempDir() under a long
-	// TMPDIR blows past that; MkdirTemp in /tmp stays short.
+	// A socket path is capped near 100 bytes, which t.TempDir() can exceed.
 	dir, err := os.MkdirTemp("", "muxtest")
 	require.NoError(t, err)
 	m.path = filepath.Join(dir, "master.sock")
@@ -221,8 +220,7 @@ func TestControlMasterStdin(t *testing.T) {
 	c, err := DialControlMaster(startFakeMaster(t, nil).path)
 	require.NoError(t, err)
 
-	// Binary, and larger than a socket buffer: the deploy path ships megabytes
-	// of helper binary through here.
+	// Binary and larger than a socket buffer, like the helper the deploy path ships.
 	payload := make([]byte, 1<<20)
 	for i := range payload {
 		payload[i] = byte(i)

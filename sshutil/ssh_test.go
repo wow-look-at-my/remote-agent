@@ -319,8 +319,7 @@ func TestHostKeyTOFURecordsAndThenVerifies(t *testing.T) {
 	keyB := generateTestKey(t).PublicKey()
 	addr := fakeAddr("192.0.2.10:2222")
 
-	// First contact: no known_hosts at all. The key must be accepted and
-	// recorded (OpenSSH accept-new semantics).
+	// First contact, no known_hosts: accept-new records the key.
 	callback, err := buildHostKeyCallback()
 	require.Nil(t, err)
 	require.Nil(t, callback("192.0.2.10:2222", addr, keyA))
@@ -334,8 +333,7 @@ func TestHostKeyTOFURecordsAndThenVerifies(t *testing.T) {
 	require.Nil(t, err)
 	assert.Nil(t, callback("192.0.2.10:2222", addr, keyA))
 
-	// ...and a different key for the same host must be rejected, which is
-	// the entire point of recording it.
+	// A second key for the recorded host is the case recording it exists for.
 	assert.NotNil(t, callback("192.0.2.10:2222", addr, keyB))
 }
 
@@ -350,8 +348,7 @@ func TestHostKeyUnknownHostAddedAlongsideExistingEntries(t *testing.T) {
 	line := fmt.Sprintf("known.example.com %s", string(ssh.MarshalAuthorizedKey(existing)))
 	require.Nil(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte(line), 0600))
 
-	// A brand-new host used to fail outright when known_hosts existed; now it
-	// is trusted on first use and recorded.
+	// An unknown host is trusted on first use, even when known_hosts already exists.
 	callback, err := buildHostKeyCallback()
 	require.Nil(t, err)
 	newKey := generateTestKey(t).PublicKey()

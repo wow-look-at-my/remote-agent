@@ -16,21 +16,14 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// Cache timeouts. Attributes and directory entries are cached briefly so a
-// tree walk does not pay a round trip per stat, but the window is kept short
-// because the remote changes underneath the mount: shell commands forwarded
-// by the launcher run there, and their output must be visible to the next
-// read. Negative lookups are NOT cached at all -- a file a build just created
-// has to appear immediately, and "it did not exist a second ago" is exactly
-// the wrong thing to remember.
+// Cache timeouts, kept short because forwarded commands change the remote
+// underneath the mount. Negative lookups are not cached. see docs/mount/behaviour.md
 const (
 	attrCacheTimeout  = time.Second
 	entryCacheTimeout = time.Second
 )
 
-// maxWrite is the largest write the kernel hands us in one request. 1 MiB
-// (vs the 128 KiB default) cuts the number of round trips a large file copy
-// costs by 8x.
+// The largest write the kernel hands us at once. 8x the default, so a copy costs 8x fewer trips.
 const maxWrite = 1 << 20
 
 // Options configures a mount.
@@ -73,11 +66,9 @@ func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
 			AllowOther: opts.AllowOther,
 			Debug:      opts.Debug,
 			MaxWrite:   maxWrite,
-			// Try mount(2) first and fall back to fusermount, so the mount
-			// works both as root (containers, CI) and as an ordinary user.
+			// mount(2) first, fusermount after: works as root and as an ordinary user.
 			DirectMount: true,
-			// Extended attributes are not part of the wire protocol; saying
-			// so up front stops the kernel asking on every file operation.
+			// The protocol has no xattrs, and saying so stops the kernel asking.
 			DisableXAttrs: true,
 		},
 	}
@@ -92,26 +83,19 @@ func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
 // Dir returns the local mount point.
 func (m *Mount) Dir() string { return m.dir }
 
-// Unmount detaches the filesystem and ends the session with the remote
-// helper. It fails while a process still has the mount as its working
-// directory or has files open on it -- a caller asking to unmount deserves to
-// hear that rather than have its shell yanked out from under it.
+// Unmount fails while the mount is busy. A caller that asked deserves to hear that,
+// rather than have its shell yanked out from under it.
 func (m *Mount) Unmount() error {
 	err := m.server.Unmount()
 	if err != nil {
 		return fmt.Errorf("unmount %s: %w", m.dir, err)
 	}
-	// The session is closed either way: leaving the helper attached to a
-	// mount that is going away only leaks a remote process.
+	// Closed either way: a helper attached to a departing mount is a leaked process.
 	return m.client.Close()
 }
 
-// ForceUnmount detaches the filesystem even if it is busy, and is what
-// shutdown paths use. A mount whose backing session has ended is not merely
-// broken, it is contagious: every process that so much as stats it blocks in
-// the kernel forever, so `df`, a shell completing a path, or an unrelated
-// test's statfs all hang. Detaching a busy mount is strictly better than
-// leaving that behind.
+// ForceUnmount detaches a busy mount, and every shutdown path uses it: a mount on a
+// dead session blocks any process that stats it, forever. see docs/mount/behaviour.md
 func (m *Mount) ForceUnmount() error {
 	err := m.server.Unmount()
 	if err != nil {
@@ -148,8 +132,7 @@ func forceDetach(dir string) error {
 	return nil
 }
 
-// Wait blocks until the filesystem is unmounted (by Unmount, or externally
-// with umount/fusermount).
+// Wait blocks until something unmounts the filesystem, here or from outside.
 func (m *Mount) Wait() { m.server.Wait() }
 
 // shared holds what every node in the tree needs.
@@ -157,9 +140,7 @@ type shared struct {
 	client *Client
 }
 
-// node is one file or directory in the mounted tree. Its path is derived from
-// its position in the tree, so renames of parent directories move children
-// with them for free.
+// One file or directory. Its path comes from its position, so a parent rename moves it.
 type node struct {
 	fs.Inode
 	shared *shared

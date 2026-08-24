@@ -39,18 +39,14 @@ const (
 
 	// muxNoEscape disables the escape character for a session.
 	muxNoEscape = 0xffffffff
-	// muxMaxPacket bounds a packet from the master. Its replies are a few
-	// words plus an error string; anything larger is a desynchronized stream.
+	// A master's reply is a few words. Anything larger is a desynchronized stream.
 	muxMaxPacket = 256 << 10
-	// muxDialTimeout bounds the handshake with the master, so a socket file
-	// whose owner is wedged fails instead of hanging the connect.
+	// Bounds the handshake, so a socket whose owner is wedged fails instead of hanging.
 	muxDialTimeout = 10 * time.Second
 )
 
-// ControlConn runs commands through an OpenSSH control master rather than a
-// connection this process dialed. Each command opens its own connection to
-// the control socket and its own session on the master's SSH transport, so
-// commands run concurrently exactly as they do over a direct connection.
+// ControlConn runs commands through an OpenSSH control master. Each command takes its
+// own connection and its own session, so they run concurrently. see docs/ssh/connection.md
 type ControlConn struct {
 	path string
 	sem  chan struct{} // bounds concurrent sessions, as CommandRunner does
@@ -58,10 +54,8 @@ type ControlConn struct {
 	MasterPID uint32
 }
 
-// DialControlMaster returns a connection that runs commands through the
-// control master listening at path. The master is probed with an alive check,
-// so a stale socket file left behind by a dead master fails here rather than
-// on the first command.
+// DialControlMaster probes the master with an alive check, so a stale socket file
+// fails here rather than on the first command.
 func DialControlMaster(path string) (*ControlConn, error) {
 	c := &ControlConn{path: path, sem: make(chan struct{}, maxConcurrentSessions)}
 	pid, err := c.aliveCheck()
@@ -78,8 +72,7 @@ func ControlMasterAlive(path string) bool {
 	return err == nil
 }
 
-// Close releases this side of the control socket. The master itself is left
-// running: it belongs to whoever started it, not to this process.
+// Close releases this side only. The master belongs to whoever started it.
 func (c *ControlConn) Close() error { return nil }
 
 // Run executes a command on the master's connection.
@@ -127,15 +120,12 @@ func (c *ControlConn) StartStream(command string) (io.ReadWriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Stderr is drained rather than buffered: the helper reports failures
-	// in-band, and a full stderr socket would stall the session.
+	// The helper reports failures in-band, and a full stderr socket stalls the session.
 	go io.Copy(io.Discard, sess.stderr)
 	return sess, nil
 }
 
-// muxSession is one command running on the master: the control connection
-// that carries its request and exit status, plus our ends of the three
-// socketpairs the master uses as the command's stdio.
+// One command on the master: its control connection, plus our ends of the stdio socketpairs.
 type muxSession struct {
 	ctl       *net.UnixConn
 	sessionID uint32
@@ -394,8 +384,7 @@ func socketPair(name string) (ours *net.UnixConn, theirs int, err error) {
 	return conn.(*net.UnixConn), fds[1], nil
 }
 
-// sendFD passes one descriptor over the control socket, the way OpenSSH's
-// mm_send_fd does: a single byte of payload carrying an SCM_RIGHTS message.
+// One byte of payload carrying SCM_RIGHTS, the way OpenSSH's mm_send_fd does it.
 func sendFD(ctl *net.UnixConn, fd int) error {
 	_, _, err := ctl.WriteMsgUnix([]byte{0}, unix.UnixRights(fd), nil)
 	return err
