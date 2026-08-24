@@ -23,9 +23,7 @@ func (h *Handler) handleGlob(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// The remote helper does the walking: matching, ordering and limiting on
-	// the remote side means one round trip instead of one per directory, and
-	// avoids depending on the remote's find/xargs dialect.
+	// The helper walks the tree: one round trip, and no dependency on the remote's find.
 	cmd := fmt.Sprintf("%s serve glob --pattern %s --path %s",
 		h.daemon.remotePath, shellEscape(pattern), shellEscape(path))
 	if limit > 0 {

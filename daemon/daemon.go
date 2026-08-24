@@ -257,8 +257,7 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		return
 	}
 
-	// Track the request so the idle watchdog neither fires mid-operation nor
-	// counts a long-running command's duration as idle time.
+	// Held so the watchdog neither fires mid-operation nor counts the command as idle.
 	d.opStart()
 	defer d.opEnd()
 
@@ -381,9 +380,7 @@ func deployBinaryData(runner Runner, data []byte) (remotePath string, reused boo
 	return remotePath, false, nil
 }
 
-// cachedDeploy reports whether remotePath lives in the persistent helper
-// cache (as opposed to a throwaway /tmp path), in which case disconnect
-// leaves it in place for the next connect to reuse.
+// A helper in the persistent cache, not on a throwaway path, survives disconnect.
 func cachedDeploy(remotePath string) bool {
 	return strings.Contains(remotePath, "/.cache/remote-agent/")
 }

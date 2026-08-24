@@ -179,8 +179,7 @@ func TestShutdownWithRunner(t *testing.T) {
 
 }
 
-// slowAuditRunner delays audit commands and records completion order, so the
-// test can prove shutdown drains in-flight async audits before proceeding.
+// Delays audits and records the order, to prove shutdown drains them first.
 type slowAuditRunner struct {
 	mu        sync.Mutex
 	completed []string
@@ -214,8 +213,7 @@ func TestShutdownDrainsPendingAudits(t *testing.T) {
 	resp := h.handleExec(map[string]any{"command": "whoami"})
 	require.True(t, resp.OK)
 
-	// The exec audit is still sleeping in its goroutine here. shutdown must
-	// wait for it before writing the shutdown audit entry.
+	// The exec audit still sleeps here, and shutdown must wait for it.
 	d.shutdown()
 
 	runner.mu.Lock()
@@ -313,9 +311,7 @@ func TestDeployBinaryDataUploadsWhenNotCached(t *testing.T) {
 	assert.Equal(t, wantPath, path)
 	assert.True(t, cachedDeploy(path))
 
-	// The upload must stream the binary via stdin to a temp path, then mv it
-	// into place after chmod (so a concurrent connect never sees a partial or
-	// not-yet-executable file).
+	// stdin to a temp path, chmod, then mv: a concurrent connect never sees a partial file.
 	uploads := 0
 	for _, c := range mock.snapshotCalls() {
 		if c.Stdin != nil {

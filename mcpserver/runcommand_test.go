@@ -27,8 +27,7 @@ func TestRunCommandInDirectory(t *testing.T) {
 	backend.results["exec"] = protocol.ExecResult{Stdout: "ok\n"}
 
 	callText(t, backend, "run_command", map[string]any{"command": "make build", "cwd": "/srv/it's mine"})
-	// The directory is quoted as one word, so a space or a quote in it cannot
-	// split the command or escape into it.
+	// One quoted word, so a space or a quote in it cannot split or escape the command.
 	assert.Equal(t, `cd '/srv/it'\''s mine' && make build`, backend.lastCall(t).Params["command"])
 }
 

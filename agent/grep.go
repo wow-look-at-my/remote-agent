@@ -15,14 +15,11 @@ import (
 )
 
 const (
-	// DefaultGrepLimit caps how many results a grep returns when the caller
-	// does not ask for a different limit.
+	// Results returned when the caller asks for no limit.
 	DefaultGrepLimit = 200
-	// binarySniffBytes is how much of a file's head is inspected for NUL
-	// bytes before deciding it is binary and skipping it.
+	// How much of a file's head is sniffed for NUL bytes before it counts as binary.
 	binarySniffBytes = 8192
-	// maxGrepLine caps how much of a single matching line is returned;
-	// minified bundles otherwise produce megabyte-long "lines".
+	// Per matching line. A minified bundle otherwise produces a megabyte-long "line".
 	maxGrepLine = 2000
 )
 
@@ -184,8 +181,7 @@ func grepFile(path string, re *regexp.Regexp, mode string, contextLines int) (ma
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 
-	// Ring of preceding lines so "before" context can be emitted once a match
-	// is found without holding the whole file in memory.
+	// A ring of preceding lines, so context needs no copy of the whole file.
 	before := make([]string, 0, contextLines)
 	after := 0
 	lineNo := 0
@@ -224,8 +220,7 @@ func grepFile(path string, re *regexp.Regexp, mode string, contextLines int) (ma
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		// A line too long for the scanner buffer (or an I/O failure) leaves
-		// whatever was found so far usable; the file still counts as scanned.
+		// An over-long line or an I/O failure keeps what was found, and the file counts.
 		return matches, count, true, nil
 	}
 	return matches, count, true, nil

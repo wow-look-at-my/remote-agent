@@ -7,16 +7,13 @@ import (
 )
 
 const (
-	// defaultReadLines is how many lines read_file returns when the caller
-	// does not ask for a specific window.
+	// What read_file returns when the caller asks for no window.
 	defaultReadLines = 2000
 	// maxReadLine caps the length of a single returned line.
 	maxReadLine = 2000
-	// maxImageBytes is the largest image returned inline; anything bigger is
-	// refused rather than blown up into megabytes of base64.
+	// The largest inline image. A bigger one is refused, not turned into base64.
 	maxImageBytes = 5 << 20
-	// maxOutputBytes caps each of a command's output streams. A build log can
-	// run to megabytes, which is context spent for nothing.
+	// Per output stream. A build log runs to megabytes, which is context spent for nothing.
 	maxOutputBytes = 64 << 10
 )
 

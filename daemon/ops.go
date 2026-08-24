@@ -53,13 +53,9 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	})
 }
 
-// parseLsCommand checks if a command is a simple "ls [path]" that the native
-// ls handler can answer faithfully, returning the path and whether it is
-// recursive. Anything the structured handler cannot reproduce falls through
-// to real exec (ok=false): unsupported flags, multiple paths, and — crucially
-// — paths with characters the shell would transform. The handler quotes the
-// path literally, so rewriting "ls *.go" would search for a file literally
-// named "*.go", find nothing, and silently print an empty listing.
+// parseLsCommand recognizes the "ls [path]" the structured handler answers faithfully.
+// Everything else falls through to exec, because the handler quotes the path literally
+// and "ls *.go" would then match nothing and print an empty listing.
 func parseLsCommand(command string) (path string, recursive bool, ok bool) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 || parts[0] != "ls" {
@@ -84,17 +80,13 @@ func parseLsCommand(command string) (path string, recursive bool, ok bool) {
 	return path, recursive, true
 }
 
-// plainLsPath reports whether p is a literal path with no characters the
-// shell (globbing, expansion, quoting, escaping, operators) would transform.
+// A literal path, with no character the shell would transform.
 func plainLsPath(p string) bool {
 	return !strings.ContainsAny(p, "*?[]{}~$`\"'\\!()<>|&;#")
 }
 
-// stripTrailingRedirect removes a trailing "2>&1" from commands since stderr
-// is already captured separately by the SSH transport. It leaves the command
-// untouched when any other '>' redirect is present: in "cmd > log 2>&1" the
-// trailing redirect sends stderr into the log file, and stripping it would
-// change what lands in the file.
+// The transport captures stderr already, so a trailing "2>&1" goes. Another '>' in the
+// command leaves it alone: in "cmd > log 2>&1" the redirect fills the log file.
 func stripTrailingRedirect(command string) string {
 	trimmed := strings.TrimSpace(command)
 	if !strings.HasSuffix(trimmed, "2>&1") {
@@ -113,9 +105,7 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	// cat the raw bytes: the SSH channel is binary-safe, so remote base64
-	// encoding (33% wire inflation plus an extra remote process) is wasted
-	// work, and it kept read from working on remotes without a base64 binary.
+	// The channel is binary-safe, so raw bytes beat base64 and need no remote binary.
 	cmd := fmt.Sprintf("cat %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
@@ -126,9 +116,7 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	info := protocol.FileInfo{Size: int64(len(stdout))}
-	// JSON strings cannot carry invalid UTF-8 (encoding/json substitutes
-	// U+FFFD), so binary content is base64-framed across the socket hop and
-	// decoded again by the client. Text stays human-readable in --json.
+	// JSON cannot carry invalid UTF-8, so binary content is base64 on the socket hop.
 	if utf8.Valid(stdout) {
 		info.Content = string(stdout)
 	} else {
@@ -157,10 +145,7 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	// Audit (concurrently, on its own SSH channel)
 	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(data)))
 
-	// Stream the content over stdin. The SSH channel is binary-safe, and
-	// unlike the previous echo-base64-in-the-command-line approach this is
-	// immune to the kernel's per-argument size cap (MAX_ARG_STRLEN, 128 KiB),
-	// which made every write over ~96 KiB fail with "Argument list too long".
+	// Content rides stdin, which the kernel's 128 KiB per-argument cap does not reach.
 	cmd := fmt.Sprintf("cat > %s && chmod %s %s", shellEscape(path), mode, shellEscape(path))
 	_, stderr, exitCode, err := h.daemon.runner.RunStdin(cmd, data)
 	if err != nil {
@@ -302,9 +287,8 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// Use find for both modes; %y gives type (d/f/l), %l gives symlink target.
-	// find is present on BusyBox (and other minimal images) where GNU
-	// `stat --format` is not. The non-recursive case just caps depth at 1.
+	// find, because BusyBox has it and GNU `stat --format` is not there. %y is the type,
+	// %l the symlink target, and the non-recursive case caps the depth at 1.
 	var cmd string
 	if recursive {
 		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
@@ -318,10 +302,8 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	entries := parseFindOutput(string(stdout))
-	// find exits non-zero on errors like a missing directory. A partial
-	// listing (e.g. permission-denied subtrees during a recursive walk) still
-	// returns what was found, but a failure with no entries at all used to be
-	// silently reported as an empty directory — surface the error instead.
+	// A partial listing still returns what it found. A failure with nothing at all is
+	// an error, never an empty directory.
 	if exitCode != 0 && len(entries) == 0 {
 		msg := strings.TrimSpace(string(stderr))
 		if msg == "" {

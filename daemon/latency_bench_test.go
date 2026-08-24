@@ -17,11 +17,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// This file provides an end-to-end latency harness for the daemon's SSH
-// operations: a minimal in-process SSH server plus a delay-line TCP proxy that
-// injects a fixed one-way network latency in each direction. The benchmarks
-// measure how many network round trips a daemon operation costs, which is the
-// dominant per-command overhead when remote-agent drives a real remote host.
+// A latency harness: an in-process SSH server behind a delay-line proxy. The benchmarks
+// count the round trips an operation costs, which dominate every command's overhead.
 
 // benchRemotePath is the fake remote helper path used in audit commands.
 const benchRemotePath = "/tmp/.remote-agent-test"
@@ -207,8 +204,7 @@ func TestHandleExecOverRealSSH(t *testing.T) {
 	require.Empty(t, resp.Error)
 	require.True(t, resp.OK)
 
-	// Round-trip through JSON exactly like the daemon socket does, so the
-	// assertion sees what a client would see.
+	// Through JSON, like the socket, so the assertion sees what a client sees.
 	raw, err := json.Marshal(resp.Data)
 	require.NoError(t, err)
 	var m map[string]any
@@ -225,9 +221,7 @@ func benchExecOnce(tb testing.TB, h *Handler) {
 	}
 }
 
-// oneWayDelay is the synthetic one-way network latency used by the latency
-// benchmarks (RTT = 2 * oneWayDelay). Real-world RTTs are 10-100x larger; the
-// measured overhead scales linearly with RTT.
+// Half an RTT. A real RTT is 10-100x larger, and the overhead scales linearly with it.
 const oneWayDelay = 2 * time.Millisecond
 
 // BenchmarkExecSequentialRTT measures the wall time of sequential execs over a

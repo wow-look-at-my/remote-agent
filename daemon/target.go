@@ -113,8 +113,7 @@ func CanonicalTarget(target string, port int) (string, error) {
 	return ep.String(), nil
 }
 
-// normalizeTarget is CanonicalTarget for the path helpers, which have no way
-// to report an error: a target that does not parse keys on its own text.
+// For the path helpers, which cannot report an error. A bad target keys on its own text.
 func normalizeTarget(target string) string {
 	ep, err := ParseTarget(target)
 	if err != nil {

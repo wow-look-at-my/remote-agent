@@ -23,9 +23,7 @@ var claudeShimCmd = &cobra.Command{
 		if len(args) == 0 {
 			return fmt.Errorf("usage: remote-agent claude-shim <command>")
 		}
-		// Claude always passes exactly one argument (its prefix wrapper quotes
-		// the whole command line as one word); joining is defensive for manual
-		// invocations.
+		// Claude passes one argument. The join is for a manual invocation.
 		code, err := client.RunClaudeShim(strings.Join(args, " "))
 		if err != nil {
 			return err

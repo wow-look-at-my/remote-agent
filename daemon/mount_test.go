@@ -242,9 +242,7 @@ func TestPrepareMountpoint(t *testing.T) {
 
 func TestDaemonRefusesToMountADirectoryOverItself(t *testing.T) {
 	requireFUSE(t)
-	// Simulate a remote that is this same machine: the probe file the daemon
-	// drops in the mount point is visible at the "remote" path, because they
-	// are one directory.
+	// A remote that is this machine: one directory, so the probe file is visible remotely.
 	shared := t.TempDir()
 	d := newMountDaemon(t, shared)
 	runner := d.runner.(*mockRunner)
@@ -265,8 +263,7 @@ func TestDaemonMountProceedsWhenRemoteIsDifferent(t *testing.T) {
 	requireFUSE(t)
 	remote := t.TempDir()
 	d := newMountDaemon(t, remote)
-	// The mock runner answers with nothing, i.e. the probe file is not
-	// visible remotely: a genuinely different machine.
+	// The runner answers nothing, so the probe file is invisible: a different machine.
 	mnt := filepath.Join(t.TempDir(), "mnt")
 	assert.True(t, d.handleMountAction(map[string]any{"local_path": mnt, "remote_path": "/"}).OK)
 }

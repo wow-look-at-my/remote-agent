@@ -31,8 +31,7 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{results: map[string]any{}}
 }
 
-// testTarget is the default target the test servers are built with, standing in
-// for the one `remote-agent mcp user@host` is given.
+// Stands in for the target `remote-agent mcp user@host` is given.
 const testTarget = "user@testhost"
 
 func (f *fakeBackend) Call(route protocol.Route, action string, params map[string]any, out any) error {

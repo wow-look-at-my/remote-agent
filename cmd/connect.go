@@ -23,8 +23,7 @@ connection to the host.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
-		// --control-path is a global flag; client resolves it (flag, then
-		// REMOTE_AGENT_CONTROL_PATH) so every entry point agrees.
+		// The client resolves --control-path itself, so every entry point agrees.
 		return client.Connect(args[0], port, "")
 	},
 }

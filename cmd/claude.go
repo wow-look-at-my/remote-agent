@@ -52,8 +52,7 @@ Examples:
 		mountAt, _ := cmd.Flags().GetString("mount-at")
 		noMount, _ := cmd.Flags().GetBool("no-mount")
 
-		// Positional args before "--" are the optional target; args after "--"
-		// are passed through to claude.
+		// Before "--" is the optional target. After it, everything reaches claude.
 		dash := cmd.ArgsLenAtDash()
 		pre := args
 		var claudeArgs []string
@@ -65,8 +64,7 @@ Examples:
 		var target string
 		switch len(pre) {
 		case 0:
-			// No positional target: fall back to --target, then to a running
-			// daemon (or the last one that ran, which is restarted).
+			// No positional target: --target, then a running or last-run daemon.
 			target = client.TargetOverride
 		case 1:
 			target = pre[0]

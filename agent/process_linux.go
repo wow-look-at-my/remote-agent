@@ -84,8 +84,7 @@ func readProcessInfo(pid int) (*protocol.ProcessInfo, error) {
 }
 
 func parseStat(info *protocol.ProcessInfo, data string) {
-	// Format: pid (comm) state ppid ... rss ...
-	// The comm field can contain spaces and parentheses, so we find the last ')'
+	// `pid (comm) state ppid ...`, where comm can hold spaces and parentheses.
 	start := strings.Index(data, "(")
 	end := strings.LastIndex(data, ")")
 	if start < 0 || end < 0 || end <= start {
@@ -105,8 +104,7 @@ func parseStat(info *protocol.ProcessInfo, data string) {
 	info.State = rest[0]
 	info.PPID, _ = strconv.Atoi(rest[1])
 
-	// RSS is field 23 in stat (index 21 in rest, since rest starts after comm)
-	// Actually rest[21] is rss in pages
+	// Field 23 of stat, which is rest[21] because rest starts after comm. In pages.
 	rssPages, _ := strconv.ParseInt(rest[21], 10, 64)
 	info.RSS = rssPages * int64(os.Getpagesize())
 }
