@@ -19,4 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       # fuse3 runs the real mount tests; bubblewrap sandboxes the dats suites.
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3 bubblewrap
+      # Native binaries, not the default fat APE: go-fuse needs syscall.Splice.
       - uses: wow-look-at-my/go-toolchain@v1
+        with:
+          os: linux,darwin,windows
+          arch: amd64,arm64
