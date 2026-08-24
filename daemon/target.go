@@ -7,8 +7,7 @@ import (
 	"strings"
 )
 
-// defaultSSHPort is the port a target with no port of its own uses, unless
-// ssh_config names another one for the host.
+// defaultSSHPort applies when neither the target nor ssh_config names one.
 const defaultSSHPort = 22
 
 // Endpoint is a parsed SSH target: the login, the host and the port.
@@ -97,11 +96,9 @@ func (e Endpoint) Login() string {
 	return "root"
 }
 
-// CanonicalTarget returns the string a daemon keys on. The port belongs to
-// that identity: one host on two ports is two machines, and a daemon keyed on
-// user@host alone answers for whichever port connected first. A port given
-// separately merges into the target. Two different ports for one target are an
-// error, because the alternative is a silent choice between two hosts.
+// CanonicalTarget returns the string a daemon keys on: one host on two ports is two
+// machines. A port given separately merges in; two that disagree are an error, because
+// the alternative is a silent choice between two hosts.
 func CanonicalTarget(target string, port int) (string, error) {
 	ep, err := ParseTarget(target)
 	if err != nil {

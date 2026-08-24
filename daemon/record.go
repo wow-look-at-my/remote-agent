@@ -13,30 +13,22 @@ import (
 // paths are a one-way hash of the target, so without this a client that finds
 // a dead or missing socket has no way back to the target it should reconnect.
 type TargetRecord struct {
-	// Target is the canonical target, port included when one is known. It is
-	// what the socket, the PID file and this record are all named from.
+	// Target is canonical, port included: socket, PID file and this record are named from it.
 	Target string `json:"target"`
-	// Port is the port the target itself names, 0 when it names none. It
-	// duplicates the port in Target, and is what lets a record written before
-	// the port became part of the target still reach the right endpoint.
+	// Port duplicates the port in Target; it recovers one from a record written before that.
 	Port int `json:"port"`
-	// ControlPath is the control-master socket the daemon ran through, empty
-	// when it dialed the host itself. A restart reuses it, and a client that
-	// asks for a different one can see that this daemon is not it.
+	// ControlPath is the master the daemon rode, empty when it dialed the host itself.
 	ControlPath string `json:"control_path,omitempty"`
 }
 
-// TargetPath returns the target-record path for a given target. It keys on the
-// canonical target, the same as SocketPath, so a record always sits beside the
-// socket of the endpoint it describes.
+// TargetPath keys on the canonical target like SocketPath, so record and socket sit together.
 func TargetPath(target string) string {
 	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.target", h[:6]))
 }
 
-// WriteTargetRecord records the target a daemon was started for. The record
-// deliberately outlives the daemon: it is what lets the next command restart a
-// daemon that idled out or died.
+// WriteTargetRecord records a daemon's target. It outlives the daemon so the next
+// command can restart one that idled out.
 func WriteTargetRecord(rec TargetRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
@@ -61,10 +53,8 @@ func ReadTargetRecord(path string) (TargetRecord, error) {
 	return rec, nil
 }
 
-// TargetForSocket returns the record for the daemon listening on sockPath.
-// Socket and record are named from the same hash of the target, so a client
-// that found a daemon by discovery can still name the host it is talking to --
-// which is what lets it pass that target on to a tool call.
+// TargetForSocket names the host behind a socket, so a discovered daemon can still be
+// routed to by target.
 func TargetForSocket(sockPath string) (TargetRecord, error) {
 	return ReadTargetRecord(strings.TrimSuffix(sockPath, ".sock") + ".target")
 }
