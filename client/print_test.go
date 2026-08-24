@@ -108,8 +108,7 @@ func TestCallDecodesTypedResults(t *testing.T) {
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 
-	// The mock daemon echoes an OK response with no payload for unknown
-	// actions; Call must still succeed, with and without an out parameter.
+	// The mock answers an unknown action with an empty OK, and Call must still succeed.
 	var listing protocol.DirListing
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, &listing))
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, nil))
@@ -131,7 +130,6 @@ func TestCallWithoutDaemon(t *testing.T) {
 func TestDaemonBackendDelegatesToCall(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("REMOTE_AGENT_NO_AUTOSTART", "1")
-	// No daemon running for the named target: the adapter must surface the
-	// failure rather than answering from some other daemon.
+	// No daemon for this target: the adapter fails rather than answer from another one.
 	assert.Error(t, DaemonBackend{}.Call(protocol.Route{Target: "root@host"}, "read", map[string]any{"path": "/x"}, nil))
 }

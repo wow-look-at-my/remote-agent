@@ -4,9 +4,7 @@ package client
 
 import "syscall"
 
-// daemonSysProcAttr returns the SysProcAttr used when spawning the detached
-// daemon. Setsid places the daemon in its own session so it survives the
-// launcher (and the controlling terminal) exiting.
+// Setsid puts the daemon in its own session, so it survives the launcher and the terminal.
 func daemonSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }

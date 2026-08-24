@@ -10,99 +10,32 @@ import (
 	"strings"
 )
 
-// This file implements the hidden `claude-shim` command -- the program that
-// CLAUDE_CODE_SHELL_PREFIX invokes (via client/shellprefix.sh) when Claude Code
-// is launched through `remote-agent claude`.
-//
-// Claude Code v2.1.185+ wraps THREE kinds of spawns with the shell prefix,
-// passing each full command line as ONE argument:
-//
-//  1. Bash tool commands -- wrapped in machine-generated scaffolding (below).
-//     These must run on the REMOTE host; that is the whole point of the
-//     launcher.
-//  2. Hook commands (SessionStart etc.) -- passed bare. Claude injects env vars
-//     (CLAUDE_PROJECT_DIR, CLAUDE_ENV_FILE, ...) into the LOCAL spawn
-//     environment only, and the hook script exists on the local machine, so
-//     hooks must run LOCALLY -- exactly as they did before v2.1.185, when hook
-//     commands were not prefix-wrapped at all.
-//  3. MCP stdio servers -- long-lived bidirectional JSON-RPC processes. The
-//     buffered request/response remote exec path can never carry them (no
-//     stdin bridge), and like hooks they rely on local env and local files, so
-//     they must run LOCALLY too.
-//
-// The Bash tool wrapper built by v2.1.185 for a user command <cmd> is a single
-// "&&"-joined string:
-//
-//	source <local snapshot path> 2>/dev/null || true &&   [iff the snapshot exists locally]
-//	<session-env preamble text>\n: &&                      [iff a hook wrote session env]
-//	{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true &&
-//	eval '<cmd>' < /dev/null &&
-//	pwd -P >| <local tmpdir>/claude-<id>-cwd
-//
-// Two of those clauses are poison on a remote host:
-//
-//   - The leading `source` of the LOCAL shell-snapshot file. The file does not
-//     exist remotely (and sourcing a local bash state dump would be wrong even
-//     if it did). On BusyBox ash `source` is the POSIX special builtin `.`, so
-//     the failed open is a FATAL shell abort that `|| true` cannot rescue and
-//     `2>/dev/null` silences -- every command returns zero bytes with exit 2,
-//     which Claude renders as "(No output)". bash remotes survive only because
-//     bash's `source` is non-fatal; dash only because it has no `source` at
-//     all.
-//   - The trailing `pwd -P >| <path>` writes Claude's cwd-tracking file into
-//     the REMOTE /tmp. The local file Claude actually reads is never written,
-//     so Claude reports "Shell cwd was reset" after every command.
-//
-// launderBashToolWrapper strips exactly those two clauses before forwarding;
-// everything between them (the inlined session-env text, the glob-setup
-// marker, the eval) is remote-safe and forwarded verbatim. After a successful
-// remote run the shim writes the local cwd file itself with its own working
-// directory -- which is what `pwd -P` would have printed for a local run that
-// did not `cd` -- keeping Claude's cwd tracker quiet.
+// The hidden `claude-shim` command: what CLAUDE_CODE_SHELL_PREFIX invokes.
+// Claude wraps Bash tool commands, hooks and MCP servers alike, and only the
+// first kind may reach the remote. see docs/claude/shim.md
 
-// bashToolMarker is the glob-setup clause Claude Code v2.1.185 embeds in every
-// Bash tool wrapper when CLAUDE_CODE_SHELL_PREFIX is set (and only then -- an
-// unset prefix gets a shell-specific `shopt`/`setopt` form instead, but then no
-// shim runs at all). Hook and MCP command lines are user configuration and
-// cannot plausibly contain this machine-generated text, so its presence is the
-// classification signal: marker => Bash tool command (forward to the remote),
-// no marker => hook/MCP/other (run locally).
-//
-// Misclassification risks are asymmetric: forwarding a hook remotely breaks it
-// (missing env/files), but running a Bash tool command locally would silently
-// execute the user's command on the WRONG machine -- worse. The marker is the
-// most conservative signal available for telling the two apart.
+// Present in every Bash tool wrapper and in no hook or MCP command line, so it is the classifier.
 const bashToolMarker = "{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true"
 
-// snapshotPathMarker identifies Claude Code's shell-snapshot files: they always
-// live in a `shell-snapshots` directory and are named `snapshot-<shell>-...`.
-// The leading source clause is stripped only when the sourced path matches, so
-// nothing that is not a Claude snapshot reference is ever removed.
+// Claude's shell snapshots. Only a source clause naming one of these is stripped.
 const snapshotPathMarker = "shell-snapshots/snapshot-"
 
 // cwdTailSeparator joins the final cwd-tracking clause onto the wrapper.
 const cwdTailSeparator = " && pwd -P >| "
 
-// runLocalFunc is a seam so tests can intercept the local-execution path (the
-// real Unix implementation replaces this process via exec(2) and never
-// returns).
+// A seam: the real Unix path replaces this process through exec(2) and never returns.
 var runLocalFunc = runLocal
 
-// Test seams: the portable local runner wires the child process to these
-// streams. They default to the real stdio (as *os.File values, so os/exec
-// passes the file descriptors straight through with no copying goroutines --
-// which is what long-lived bidirectional MCP stdio servers need).
+// Test seams. These stay *os.File, so os/exec hands the descriptors straight to the
+// child with no copying goroutines -- which is what a long-lived MCP stdio server needs.
 var (
 	localStdin  io.Reader = os.Stdin
 	localStdout io.Writer = os.Stdout
 	localStderr io.Writer = os.Stderr
 )
 
-// RunClaudeShim handles one CLAUDE_CODE_SHELL_PREFIX invocation: Bash tool
-// wrappers are laundered and forwarded to the remote host through the daemon,
-// everything else (hooks, MCP stdio servers) runs locally with inherited env
-// and stdio. It returns the command's exit code; a non-nil error indicates a
-// transport/daemon failure rather than the command itself failing.
+// RunClaudeShim forwards a Bash tool wrapper to the remote and runs everything else
+// locally. The error is a transport failure; a failing command shows in the exit code.
 func RunClaudeShim(command string) (int, error) {
 	if IsBashToolWrapper(command) {
 		return forwardBashToolWrapper(command)
@@ -110,8 +43,7 @@ func RunClaudeShim(command string) (int, error) {
 	return runLocalFunc(command)
 }
 
-// IsBashToolWrapper reports whether command is a Claude Code Bash tool wrapper
-// (as opposed to a hook or MCP server command line). See bashToolMarker.
+// IsBashToolWrapper tells a Bash tool wrapper from a hook or MCP command line.
 func IsBashToolWrapper(command string) bool {
 	return strings.Contains(command, bashToolMarker)
 }
@@ -133,14 +65,8 @@ func forwardBashToolWrapper(command string) (int, error) {
 	return code, nil
 }
 
-// prefixWorkingDirectory makes a forwarded command run in the directory claude
-// is working in, instead of the remote home.
-//
-// It applies only when the session mounted the remote at the identical local
-// path (REMOTE_AGENT_MOUNT), because only then is the local working directory
-// also a valid remote directory. Without it, `cat main.go` after `cd` into a
-// project would look for the file in the remote home -- the mismatch that made
-// the launcher feel like two machines instead of one.
+// prefixWorkingDirectory runs a forwarded command where claude is working, not in the
+// remote home. Only a same-path mount makes that directory valid remotely.
 func prefixWorkingDirectory(command string) string {
 	mount := os.Getenv("REMOTE_AGENT_MOUNT")
 	if mount == "" {
@@ -153,8 +79,7 @@ func prefixWorkingDirectory(command string) string {
 	if wd != mount && !strings.HasPrefix(wd, mount+"/") {
 		return command
 	}
-	// A failed cd must abort the command rather than silently run it in the
-	// wrong directory, so this is && and not ;.
+	// && and not ;: a failed cd must abort, not run the command elsewhere.
 	return "cd " + shellQuote(wd) + " && " + command
 }
 
@@ -163,13 +88,8 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
-// launderBashToolWrapper strips the two local-machine clauses from a Bash tool
-// wrapper: the leading shell-snapshot source (fatal on BusyBox ash, wrong
-// everywhere remotely) and the trailing cwd-file write (litters the remote
-// /tmp; the path is local). It returns the remote-safe remainder and the local
-// cwd file path captured from the tail ("" when no tail was present). Clauses
-// that do not match exactly are left untouched -- unrecognized input is
-// forwarded unchanged rather than mangled.
+// launderBashToolWrapper strips the two local-machine clauses and returns the
+// remote-safe remainder plus the local cwd file path. see docs/claude/shim.md
 func launderBashToolWrapper(command string) (laundered, cwdFilePath string) {
 	laundered = stripSnapshotSource(command)
 	laundered, cwdFilePath = stripCwdTail(laundered)
@@ -199,14 +119,9 @@ func stripSnapshotSource(command string) string {
 	return rest
 }
 
-// stripCwdTail removes a trailing
-//
-//	&& pwd -P >| <path>
-//
-// clause and returns the remainder plus the unquoted <path>. The genuine tail
-// is always the last thing in the wrapper, so the last separator occurrence is
-// used and the path token must consume the entire remainder -- a lookalike
-// sequence inside the quoted eval body never matches.
+// stripCwdTail removes a trailing "&& pwd -P >| <path>" and returns the remainder
+// plus the unquoted path. It matches the last occurrence only, so a lookalike inside
+// the quoted eval body never wins.
 func stripCwdTail(command string) (string, string) {
 	i := strings.LastIndex(command, cwdTailSeparator)
 	if i < 0 {

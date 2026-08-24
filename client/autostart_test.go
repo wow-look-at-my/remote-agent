@@ -77,8 +77,7 @@ func TestResolveTargetFromFlag(t *testing.T) {
 	rec, err := resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, "root@flag-host", rec.Target)
-	// A target that names no port keeps none: ssh_config, else 22, decides it
-	// when the daemon connects.
+	// A target naming no port keeps none. ssh_config, else 22, decides on connect.
 	assert.Equal(t, 0, rec.Port)
 }
 
@@ -100,8 +99,7 @@ func TestResolveTargetPortFromRecordAndEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2222, rec.Port)
 
-	// A port in the environment is part of the identity as well, so it keys
-	// its own daemon rather than redirecting the one above.
+	// A port from the environment keys its own daemon, and never redirects the one above.
 	TargetOverride = "root@host"
 	t.Setenv("REMOTE_AGENT_PORT", "2022")
 	rec, err = resolveTarget()
@@ -279,8 +277,7 @@ func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
 
 func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 	isolate(t)
-	// A live daemon this process is otherwise pinned to. A call that names its
-	// own target must not be answered by it.
+	// A live daemon this process is pinned to. A call naming its own target must miss it.
 	other := daemon.SocketPath("root@other")
 	listenAt(t, other)
 	t.Setenv("REMOTE_AGENT_SOCKET", other)
