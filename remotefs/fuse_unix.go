@@ -16,8 +16,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// Cache timeouts, kept short because forwarded commands change the remote
-// underneath the mount. Negative lookups are not cached. see docs/mount/behaviour.md
+// Short, because forwarded commands change the remote underneath. see docs/mount/behaviour.md
 const (
 	attrCacheTimeout  = time.Second
 	entryCacheTimeout = time.Second
@@ -94,8 +93,7 @@ func (m *Mount) Unmount() error {
 	return m.client.Close()
 }
 
-// ForceUnmount detaches a busy mount, and every shutdown path uses it: a mount on a
-// dead session blocks any process that stats it, forever. see docs/mount/behaviour.md
+// ForceUnmount detaches a busy mount, which every shutdown path needs. see docs/mount/behaviour.md
 func (m *Mount) ForceUnmount() error {
 	err := m.server.Unmount()
 	if err != nil {

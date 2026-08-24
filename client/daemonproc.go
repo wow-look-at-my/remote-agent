@@ -28,7 +28,6 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	defer logf.Close()
 
 	// The target carries its port, so --port goes only where the record names one.
-	// An ssh_config port passed back in would change the target and move the socket.
 	args := []string{"connect", rec.Target}
 	if rec.Port > 0 {
 		args = append(args, "--port", strconv.Itoa(rec.Port))

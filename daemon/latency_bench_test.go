@@ -17,10 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// A latency harness: an in-process SSH server behind a delay-line proxy. The benchmarks
-// count the round trips an operation costs, which dominate every command's overhead.
-
-// benchRemotePath is the fake remote helper path used in audit commands.
+// The fake remote helper path in audit commands.
 const benchRemotePath = "/tmp/.remote-agent-test"
 
 // startBenchSSHServer starts a minimal SSH server that accepts exec requests.

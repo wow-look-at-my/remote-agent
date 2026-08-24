@@ -16,8 +16,7 @@ import (
 // Paths returned when the caller asks for no limit.
 const DefaultGlobLimit = 500
 
-// Machine-generated trees that swamp a result set. A pattern that names one still
-// reaches it: the skip covers only what the walk discovers on its own.
+// Machine-generated trees the walk never enters. A pattern that names one still reaches it.
 var skipDirs = set.Of(".git", "node_modules")
 
 // GlobOptions configures a glob search.

@@ -77,6 +77,17 @@ add a `publish` job to build.yml — it would duplicate autorelease.
 A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
 `make build-all`), but `go-toolchain` is the source of truth.
 
+## Docs
+
+Depth the code comments point at, rather than carry:
+
+- `docs/claude/launcher.md` -- mount point identity, tool swap, claude flag form, pinned env.
+- `docs/claude/shim.md` -- the three prefix-wrapped spawn kinds, the Bash wrapper, laundering.
+- `docs/daemon/lifecycle.md` -- target identity and port, ssh_config, idle accounting, shutdown order.
+- `docs/mount/behaviour.md` -- cache windows, mount options, force unmount, open flags.
+- `docs/ssh/connection.md` -- ssh_config resolution, keepalive, the session pool, streams.
+- `docs/ssh/control-sockets.md` -- the control-master protocol and how to test it live.
+
 ## Architecture
 
 Three roles, one binary:

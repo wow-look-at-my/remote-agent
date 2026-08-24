@@ -7,8 +7,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Stream is the mount's transport: one long-lived remote command on its own SSH
-// channel, outside the CommandRunner pool. see docs/ssh/connection.md
+// Stream is the mount's transport, on its own SSH channel. see docs/ssh/connection.md
 type Stream struct {
 	session *ssh.Session
 	stdin   io.WriteCloser

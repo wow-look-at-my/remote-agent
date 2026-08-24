@@ -176,8 +176,7 @@ func formatListing(listing *protocol.DirListing) string {
 	return b.String()
 }
 
-// exec answers with two shapes: a command result, and the listing the daemon substitutes
-// for a plain `ls [path]`. Decoding only the first turns `ls /srv` into an empty success.
+// exec answers with two shapes, and decoding only the first turns `ls /srv` into an empty success.
 type execReply struct {
 	protocol.ExecResult
 	protocol.DirListing

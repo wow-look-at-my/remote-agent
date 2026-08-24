@@ -77,8 +77,7 @@ func printExecText(m map[string]any) error {
 	stdout, _ := m["stdout"].(string)
 	stderr, _ := m["stderr"].(string)
 
-	// Each stream keeps its own channel, like a transparent shell. cmd/exec.go
-	// carries the remote exit code, so there is no "[exit N]" marker to print.
+	// Each stream keeps its own channel, and cmd/exec.go carries the remote exit code.
 	if stdout != "" {
 		fmt.Fprint(os.Stdout, stdout)
 	}

@@ -287,8 +287,7 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// find, because BusyBox has it and GNU `stat --format` is not there. %y is the type,
-	// %l the symlink target, and the non-recursive case caps the depth at 1.
+	// find, because BusyBox has it where GNU `stat --format` is missing. %y is the type.
 	var cmd string
 	if recursive {
 		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))

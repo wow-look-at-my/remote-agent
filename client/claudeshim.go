@@ -10,9 +10,7 @@ import (
 	"strings"
 )
 
-// The hidden `claude-shim` command: what CLAUDE_CODE_SHELL_PREFIX invokes.
-// Claude wraps Bash tool commands, hooks and MCP servers alike, and only the
-// first kind may reach the remote. see docs/claude/shim.md
+// The hidden `claude-shim` command, which CLAUDE_CODE_SHELL_PREFIX invokes. see docs/claude/shim.md
 
 // Present in every Bash tool wrapper and in no hook or MCP command line, so it is the classifier.
 const bashToolMarker = "{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; } >/dev/null 2>&1 || true"
@@ -26,16 +24,14 @@ const cwdTailSeparator = " && pwd -P >| "
 // A seam: the real Unix path replaces this process through exec(2) and never returns.
 var runLocalFunc = runLocal
 
-// Test seams. These stay *os.File, so os/exec hands the descriptors straight to the
-// child with no copying goroutines -- which is what a long-lived MCP stdio server needs.
+// Test seams. *os.File, so os/exec hands the descriptors over with no copying goroutines.
 var (
 	localStdin  io.Reader = os.Stdin
 	localStdout io.Writer = os.Stdout
 	localStderr io.Writer = os.Stderr
 )
 
-// RunClaudeShim forwards a Bash tool wrapper to the remote and runs everything else
-// locally. The error is a transport failure; a failing command shows in the exit code.
+// RunClaudeShim forwards a Bash tool wrapper to the remote and runs everything else locally.
 func RunClaudeShim(command string) (int, error) {
 	if IsBashToolWrapper(command) {
 		return forwardBashToolWrapper(command)

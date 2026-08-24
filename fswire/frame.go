@@ -14,9 +14,8 @@ const MaxPayload = 8 << 20
 // A header is small, so this only stops a corrupt length prefix allocating wildly.
 const MaxHeader = 16 << 20
 
-// A frame is `uint32 headerLen | header JSON | uint32 payloadLen | payload`. File data
-// stays out of the JSON: base64 inflates it by a third, and JSON cannot carry raw bytes.
-
+// A frame is `uint32 headerLen | header JSON | uint32 payloadLen | payload`. File data stays
+// out of the JSON: base64 inflates it by a third, and JSON cannot carry raw bytes at all.
 // Writer is safe for concurrent use, because a frame must reach the wire in one piece.
 type Writer struct {
 	mu sync.Mutex

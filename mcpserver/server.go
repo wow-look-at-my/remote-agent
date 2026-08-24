@@ -33,8 +33,7 @@ var supportedVersions = set.Of(
 	"2025-06-18",
 )
 
-// Backend runs one daemon action against the host a route names, and starts a daemon
-// when none answers. It is the seam that tests the tool layer without SSH.
+// Backend runs one action on the host a route names, and starts a daemon when none answers.
 type Backend interface {
 	Call(route protocol.Route, action string, params map[string]any, out any) error
 }

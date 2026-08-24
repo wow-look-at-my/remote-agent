@@ -6,10 +6,8 @@ type DaemonRequest struct {
 	Params map[string]any `json:"params,omitempty"`
 }
 
-// Route says which host an action runs on and how to reach it. It travels
-// with a call rather than being process state, because one client -- the MCP
-// server -- serves several hosts at once and is handed a control socket as an
-// argument, not as configuration it could have been started with.
+// Route says which host an action runs on. It travels with the call, because one MCP
+// server serves several hosts and is handed each one mid-session.
 type Route struct {
 	// Target is the SSH target: user@host, or a ~/.ssh/config Host alias.
 	Target string `json:"target"`

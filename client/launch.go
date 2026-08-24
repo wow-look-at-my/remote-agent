@@ -200,9 +200,7 @@ func ensureDaemon(self string, opts LaunchOptions) (sockPath, target string, sta
 	return sockPath, rec.Target, true, nil
 }
 
-// remoteToolArgs swaps the local file tools for the remote MCP toolset. Both flags
-// must keep the "--flag=value" form: claude declares them variadic, and the
-// space-separated form swallows the user's own prompt. see docs/claude/launcher.md
+// Swaps the file tools for the MCP toolset. Keep the "=" form. see docs/claude/launcher.md
 func remoteToolArgs(configPath string) []string {
 	return []string{
 		"--mcp-config=" + configPath,

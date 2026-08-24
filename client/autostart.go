@@ -68,8 +68,7 @@ func resolveTarget() (daemon.TargetRecord, error) {
 	}
 }
 
-// TargetKey folds REMOTE_AGENT_PORT into a target to give the identity its daemon
-// keys on. One host on two ports is two endpoints. see docs/daemon/lifecycle.md
+// TargetKey folds REMOTE_AGENT_PORT into a target. see docs/daemon/lifecycle.md
 func TargetKey(target string) (string, error) {
 	return targetKey(target, 0)
 }
@@ -170,8 +169,7 @@ func checkControlPath(route protocol.Route) error {
 		route.Target, via, want, route.Target)
 }
 
-// socketAnswers only connects. A request would run a remote command, which is
-// far too much work for a liveness question asked before every routed call.
+// Only connects: a request runs a remote command, which is far too much for a liveness check.
 func socketAnswers(sockPath string) bool {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
