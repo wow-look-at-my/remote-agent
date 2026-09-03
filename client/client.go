@@ -16,7 +16,6 @@ import (
 )
 
 // OutputJSON controls whether responses are printed as JSON (true) or compact
-// text (false).
 var OutputJSON bool
 
 // REMOTE_AGENT_SOCKET does the same.
@@ -44,7 +43,7 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 		return nil, startErr
 	}
 	// Pinned, so a long-lived client stops re-resolving on every later
-	// untargeted call.
+	// untargeted
 	resolvedSocket = sockPath
 	return sendRequestTo(sockPath, req)
 }
@@ -176,7 +175,6 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 		return nil
 	}
 	// Round-trip the decoded JSON into the caller's struct, rather than assert
-	// every field.
 	data, err := json.Marshal(resp.Data)
 	if err != nil {
 		return fmt.Errorf("encode %s result: %w", action, err)
@@ -188,7 +186,6 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 }
 
 // DaemonBackend satisfies the MCP server's Backend, so neither package
-// imports the other.
 type DaemonBackend struct{}
 
 // Call implements the MCP server's Backend interface.

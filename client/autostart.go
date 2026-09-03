@@ -16,15 +16,12 @@ import (
 )
 
 // TargetOverride is the --target flag: it selects the socket, and names the
-// target a fresh daemon starts for.
 var TargetOverride string
 
 // ControlPathOverride is the --control-path flag: the master a daemon this
-// process starts must run through.
 var ControlPathOverride string
 
-// Socket of a daemon this process started. It beats discovery, but never a
-// call that names its own target.
+// Socket of a daemon this process started.
 var resolvedSocket string
 
 // A request-level failure never matches, so it never reconnects.

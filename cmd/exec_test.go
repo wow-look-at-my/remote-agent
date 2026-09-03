@@ -76,7 +76,6 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 	defer func() { osExit = old }()
 
 	// Invoke the command's RunE directly to avoid mutating the shared rootCmd
-	// argument state that other tests in this package rely on.
 	suppressStdout(t)
 	assert.Nil(t, execCmd.RunE(execCmd, []string{"exit 7"}))
 

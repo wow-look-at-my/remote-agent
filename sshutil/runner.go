@@ -63,7 +63,6 @@ func (r *CommandRunner) run(command string, stdin []byte, timeout time.Duration)
 	res := r.execBounded(sess, command, stdin, timeout)
 	if !res.Started && fromSpare {
 		// The spare went stale before the exec, so the command never began and a
-		// retry is safe.
 		fresh, ferr := r.client.NewSession()
 		if ferr != nil {
 			return nil, nil, -1, res.Err

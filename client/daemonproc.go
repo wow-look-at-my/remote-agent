@@ -36,8 +36,7 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	if rec.ControlPath != "" {
 		args = append(args, "--control-path", rec.ControlPath)
 	}
-	// Through a shell: a release is an APE, which os/exec cannot execve. see
-	// docs/ape.md
+	// Through a shell: a release is an APE, which os/exec cannot execve.
 	name, argv := SelfCommand(self, args...)
 	cmd := exec.Command(name, argv...)
 	cmd.Stdout = logf

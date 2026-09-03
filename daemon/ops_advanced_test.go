@@ -417,7 +417,6 @@ func TestParseLsCommand(t *testing.T) {
 		{"", "", false, false},
 		{"lsof", "", false, false}, // not ls
 		// A glob falls through to exec: the handler quotes it and would match
-		// nothing.
 		{"ls *.go", "", false, false},
 		{"ls /tmp/*.log", "", false, false},
 		{"ls ?", "", false, false},

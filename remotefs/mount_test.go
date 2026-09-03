@@ -243,8 +243,7 @@ func TestMountReflectsRemoteChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "before", string(content))
 
-	// A change on the remote, as a forwarded command makes. It can take a cache
-	// window.
+	// A change on the remote, as a forwarded command makes.
 	require.NoError(t, os.WriteFile(f.remotePath("shared.txt"), []byte("after-the-change"), 0o644))
 
 	deadline := time.Now().Add(5 * time.Second)

@@ -310,7 +310,6 @@ func TestDeployBinaryDataUploadsWhenNotCached(t *testing.T) {
 	assert.True(t, cachedDeploy(path))
 
 	// stdin to a temp path, chmod, then mv: a concurrent connect never sees a
-	// partial file.
 	uploads := 0
 	for _, c := range mock.snapshotCalls() {
 		if c.Stdin != nil {

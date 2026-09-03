@@ -42,8 +42,7 @@ type Daemon struct {
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
 	mounts       mountRegistry  // filesystem mounts this daemon owns
 	streamFunc   streamStarter  // test seam for opening a mount's transport
-	// Idle tuning and process exit. An unset field means the default; a test
-	// gives its own daemon the values it needs, not a package global.
+	// Idle tuning and process exit.
 	idleTimeout       time.Duration
 	idleCheckInterval time.Duration
 	exit              func(int)
@@ -88,10 +87,7 @@ func (d *Daemon) opEnd() {
 	d.mu.Unlock()
 }
 
-// helper is the command word for the deployed helper. It is quoted like every
-// other argument, because a remote home directory may hold a space. The
-// remote's shell runs it: that is also what starts an APE, so the helper is
-// never handed to an execve of its own. see docs/ape.md
+// helper is the command word for the deployed helper.
 func (d *Daemon) helper() string {
 	return shellEscape(d.remotePath)
 }
@@ -236,8 +232,7 @@ func Start(opts StartOptions) error {
 	// Write PID file
 	os.WriteFile(d.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 
-	// Kept on shutdown, and Port holds no ssh_config port. see
-	// docs/daemon/lifecycle.md
+	// Kept on shutdown, and Port holds no ssh_config port.
 	WriteTargetRecord(TargetRecord{Target: target, Port: ep.Port, ControlPath: conn.ControlPath})
 
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
@@ -302,7 +297,6 @@ func (d *Daemon) handleClient(conn net.Conn) {
 	}
 
 	// Held so the watchdog neither fires mid-operation nor counts the command as
-	// idle.
 	d.opStart()
 	defer d.opEnd()
 

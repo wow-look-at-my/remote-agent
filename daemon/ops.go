@@ -129,7 +129,6 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	// The channel is binary-safe, so raw bytes beat base64 and need no remote
-	// binary.
 	cmd := fmt.Sprintf("cat %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
@@ -304,8 +303,7 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// find, because BusyBox has it where GNU `stat --format` is missing. %y is
-	// the type.
+	// find, because BusyBox has it where GNU `stat --format` is missing.
 	var cmd string
 	if recursive {
 		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))

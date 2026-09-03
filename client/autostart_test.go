@@ -272,8 +272,7 @@ func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
 
 func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 	isolate(t)
-	// A live daemon this process is pinned to. A call naming its own target must
-	// miss it.
+	// A live daemon this process is pinned to.
 	other := daemon.SocketPath("root@other")
 	listenAt(t, other)
 	t.Setenv("REMOTE_AGENT_SOCKET", other)

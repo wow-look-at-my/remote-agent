@@ -18,10 +18,8 @@ const (
 	// Results returned when the caller asks for no limit.
 	DefaultGrepLimit = 200
 	// How much of a file's head is sniffed for NUL bytes before it counts as
-	// binary.
 	binarySniffBytes = 8192
-	// Per matching line. A minified bundle otherwise produces a megabyte-long
-	// "line".
+	// Per matching line.
 	maxGrepLine = 2000
 )
 
@@ -223,7 +221,6 @@ func grepFile(path string, re *regexp.Regexp, mode string, contextLines int) (ma
 	}
 	if err := scanner.Err(); err != nil {
 		// An over-long line or an I/O failure keeps what was found, and the file
-		// counts.
 		return matches, count, true, nil
 	}
 	return matches, count, true, nil

@@ -109,7 +109,6 @@ func TestCallDecodesTypedResults(t *testing.T) {
 	defer cleanup()
 
 	// The mock answers an unknown action with an empty OK, and Call must still
-	// succeed.
 	var listing protocol.DirListing
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, &listing))
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, nil))

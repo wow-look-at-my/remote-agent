@@ -12,7 +12,6 @@ import (
 const MaxPayload = 8 << 20
 
 // A header is small, so this only stops a corrupt length prefix allocating
-// wildly.
 const MaxHeader = 16 << 20
 
 type Writer struct {

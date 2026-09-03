@@ -13,8 +13,7 @@ const (
 	maxReadLine = 2000
 	// The largest inline image.
 	maxImageBytes = 5 << 20
-	// Per output stream. A build log runs to megabytes, which is context spent
-	// for nothing.
+	// Per output stream.
 	maxOutputBytes = 64 << 10
 )
 

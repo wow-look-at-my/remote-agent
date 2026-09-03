@@ -37,8 +37,7 @@ func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
 // os/exec alone reports "exec format error" on the same file. see docs/ape.md
 func TestSelfCommandStartsAFileExecveRejects(t *testing.T) {
 	dir := t.TempDir()
-	// No #! line and no ELF header, so execve answers ENOEXEC -- the same answer
-	// it gives for an APE header. A shell reads it as a script instead.
+	// No #!
 	self := filepath.Join(dir, "noexec-header")
 	require.NoError(t, os.WriteFile(self, []byte("echo started \"$1\"\n"), 0755))
 

@@ -20,8 +20,7 @@ type CommandResult struct {
 	Stderr   []byte
 	ExitCode int
 	Err      error
-	// Started reports whether the server accepted the exec request. False means
-	// the command never began, so another session may safely retry it.
+	// Started reports whether the server accepted the exec request.
 	Started bool
 }
 

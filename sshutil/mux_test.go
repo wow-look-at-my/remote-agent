@@ -217,7 +217,6 @@ func TestControlMasterStdin(t *testing.T) {
 	require.NoError(t, err)
 
 	// Binary and larger than a socket buffer, like the helper the deploy path
-	// ships.
 	payload := make([]byte, 1<<20)
 	for i := range payload {
 		payload[i] = byte(i)

@@ -88,7 +88,6 @@ func TestClientReportsRemoteErrno(t *testing.T) {
 	defer c.Close()
 
 	// An errno is data, not a transport failure, so Call succeeds and the caller
-	// reads it.
 	resp, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(2), resp.Errno)
@@ -99,8 +98,7 @@ func TestClientFailsCallsAfterSessionEnds(t *testing.T) {
 	clientEnd, serverEnd := net.Pipe()
 	c := New(clientEnd, clientEnd, clientEnd)
 
-	// A dead connection must fail an in-flight call. A blocked FUSE thread
-	// wedges the mount.
+	// A dead connection must fail an in-flight call.
 	inFlight := make(chan error, 1)
 	go func() {
 		_, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
@@ -178,7 +176,6 @@ func TestClientAssignsUniqueIDs(t *testing.T) {
 
 func TestClientWriteFailureIsReported(t *testing.T) {
 	// A stream that rejects writes, a closed SSH channel, is an error and not a
-	// lost request.
 	c := New(brokenWriter{}, io.LimitReader(nil, 0), nil)
 	_, _, err := c.Call(&fswire.Request{Op: fswire.OpPing}, nil)
 	assert.Error(t, err)

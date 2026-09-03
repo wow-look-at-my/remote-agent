@@ -12,11 +12,9 @@ import (
 // TargetRecord remembers which SSH target a daemon socket belongs to.
 type TargetRecord struct {
 	// Target is canonical, port included: socket, PID file and this record are
-	// named from it.
 	Target string `json:"target"`
 	Port   int    `json:"port"`
 	// ControlPath is the master the daemon rode, empty when it dialed the host
-	// itself.
 	ControlPath string `json:"control_path,omitempty"`
 }
 

@@ -1,11 +1,4 @@
 // Package remotefs mounts a remote host's filesystem locally over the
-// daemon's SSH connection, so that *every* program on the local machine --
-// not just tools that know about remote-agent -- reads and writes remote
-// files through ordinary paths. That universality is the point. A
-// tool-by-tool bridge only ever covers the tools it was written for; a mount
-// covers editors, compilers, language servers, and any agent tool that has
-// not been written yet, because they all go through the kernel's filesystem
-// interface.
 package remotefs
 
 import (
@@ -166,7 +159,6 @@ func (c *Client) Ping() error {
 		return nil
 	case <-time.After(PingTimeout):
 		// The client close every failed handshake performs releases the waiting
-		// goroutine.
 		return fmt.Errorf("no response from the remote filesystem helper after %s", PingTimeout)
 	}
 }

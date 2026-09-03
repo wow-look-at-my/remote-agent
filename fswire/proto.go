@@ -1,7 +1,4 @@
 // Package fswire defines the filesystem protocol spoken between the local
-// FUSE mount and the remote helper, plus its framing. It has no dependencies
-// beyond the standard library so both ends -- including the remote helper
-// built for platforms that cannot mount anything -- can share it.
 package fswire
 
 // Op names. They mirror the POSIX calls the FUSE layer has to service.

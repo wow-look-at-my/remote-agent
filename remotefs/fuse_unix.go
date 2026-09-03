@@ -90,7 +90,6 @@ func (m *Mount) Unmount() error {
 		return fmt.Errorf("unmount %s: %w", m.dir, err)
 	}
 	// Closed either way: a helper attached to a departing mount is a leaked
-	// process.
 	return m.client.Close()
 }
 

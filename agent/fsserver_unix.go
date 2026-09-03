@@ -15,8 +15,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// Concurrent, so a large read never stalls the stats behind it. Bounded, so
-// nothing runs out.
+// Concurrent, so a large read never stalls the stats behind it.
 const fsMaxInFlight = 32
 
 // ServeFS runs the remote half of a mount: it reads filesystem requests from

@@ -24,8 +24,7 @@ type SSHConfig struct {
 	HostName string
 	User     string
 	Port     int
-	// This host's control-master socket, already expanded by `ssh -G`. Empty
-	// when there is none.
+	// This host's control-master socket, already expanded by `ssh -G`.
 	ControlPath string
 }
 
@@ -360,8 +359,7 @@ func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 	return err
 }
 
-// keepAliveInterval is the interval between keepalive pings. Can be
-// overridden in tests.
+// keepAliveInterval is the interval between keepalive pings.
 var keepAliveInterval = 30 * time.Second
 
 // keepAlive holds idle NAT and firewall state open. see

@@ -262,7 +262,6 @@ func TestDaemonMountProceedsWhenRemoteIsDifferent(t *testing.T) {
 	remote := t.TempDir()
 	d := newMountDaemon(t, remote)
 	// The runner answers nothing, so the probe file is invisible: a different
-	// machine.
 	mnt := filepath.Join(t.TempDir(), "mnt")
 	assert.True(t, d.handleMountAction(map[string]any{"local_path": mnt, "remote_path": "/"}).OK)
 }

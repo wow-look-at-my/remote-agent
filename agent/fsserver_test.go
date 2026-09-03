@@ -316,7 +316,6 @@ func TestFSServerClosesHandlesWhenSessionEnds(t *testing.T) {
 	require.NotZero(t, resp.Handle)
 
 	// A dropped connection ends the session and its handles, and leaks no open
-	// files.
 	clientEnd.Close()
 	<-done
 }

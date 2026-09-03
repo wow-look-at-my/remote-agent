@@ -1,6 +1,4 @@
 // Package mcpserver exposes a remote host's shell and filesystem to an MCP
-// client as a set of Model Context Protocol tools. A model's own file tools
-// read the machine it runs on.
 package mcpserver
 
 import (
@@ -12,8 +10,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// The MCP revision this server implements. A revision it can speak is echoed
-// back instead.
+// The MCP revision this server implements.
 const protocolVersion = "2024-11-05"
 
 // supportedVersions are the protocol revisions we echo back verbatim.
@@ -34,8 +31,7 @@ type Server struct {
 	version string
 	// For calls that omit a target. Empty makes the target argument mandatory.
 	defaultTarget string
-	// For calls that name no control master. Empty leaves the choice to
-	// ssh_config.
+	// For calls that name no control master.
 	defaultControlPath string
 	tools              []tool
 	out                *json.Encoder

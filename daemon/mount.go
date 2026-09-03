@@ -24,8 +24,7 @@ type mountEntry struct {
 	remotePath string
 }
 
-// streamStarter opens a long-lived remote stream. The seam for testing mounts
-// without SSH.
+// streamStarter opens a long-lived remote stream.
 type streamStarter func(command string) (mountStream, error)
 
 // mountStream is the bidirectional transport to the remote helper.

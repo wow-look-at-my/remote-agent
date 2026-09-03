@@ -34,11 +34,9 @@ const (
 
 	// muxNoEscape disables the escape character for a session.
 	muxNoEscape = 0xffffffff
-	// A master's reply is a few words. Anything larger is a desynchronized
-	// stream.
+	// A master's reply is a few words.
 	muxMaxPacket = 256 << 10
 	// Bounds the handshake, so a socket whose owner is wedged fails instead of
-	// hanging.
 	muxDialTimeout = 10 * time.Second
 )
 
@@ -81,9 +79,7 @@ func (c *ControlConn) RunTimeout(command string, d time.Duration) (stdout, stder
 	return c.runStdin(command, nil, d)
 }
 
-// RunStdin executes a command with stdin piped to it. A nil stdin still
-// closes the command's stdin immediately, so a command that reads sees EOF
-// instead of blocking forever.
+// RunStdin executes a command with stdin piped to it.
 func (c *ControlConn) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
 	return c.runStdin(command, stdin, 0)
 }
@@ -134,7 +130,6 @@ func (c *ControlConn) StartStream(command string) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 	// The helper reports failures in-band, and a full stderr socket stalls the
-	// session.
 	go io.Copy(io.Discard, sess.stderr)
 	return sess, nil
 }

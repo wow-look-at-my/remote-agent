@@ -13,9 +13,7 @@ import (
 )
 
 // captureStdout redirects stdout to a temp file and returns the captured
-// output. os.Stdout belongs to the whole process, so the test takes the
-// process to itself: tests capturing at the same time write into each other's
-// file, and whoever loses the race reads back nothing.
+// output.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	t.Serial()
