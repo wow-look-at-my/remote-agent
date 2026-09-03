@@ -507,8 +507,8 @@ type sshGFunc func(user, host string, port int) *exec.Cmd
 
 // stubSSHG installs stub as the seam for the rest of the test and returns the
 // real one, which a stub that inspects the command ssh would run still needs.
-// The seam is one variable for the process, so the test takes the process to
-// itself.
+// The seam is a package variable the whole process shares, so the test takes
+// the process to itself.
 func stubSSHG(t *testing.T, stub sshGFunc) sshGFunc {
 	t.Helper()
 	t.Serial()

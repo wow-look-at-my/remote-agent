@@ -10,20 +10,20 @@ import (
 )
 
 // lockCLI gives the test the process to itself. A CLI test drives state the
-// process has one of: the shared rootCmd, os.Stdout, the osExit seam, and the
-// flag globals in package client. Tests are parallel by default here, and
-// t.Serial is what the runner offers for exactly this; a lock of our own would
-// deadlock against it, because t.Setenv declares a test serial too and then
-// waits for every parallel test -- including one blocked on that lock.
+// whole process shares: the rootCmd it all runs through, os.Stdout, the osExit
+// seam, and the flag globals in package client. Tests are parallel by default
+// here, and t.Serial is what the runner offers for exactly this; a lock of our
+// own would deadlock against it, because t.Setenv declares a test serial too
+// and then waits for every parallel test -- including any blocked on that lock.
 func lockCLI(t *testing.T) {
 	t.Helper()
 	t.Serial()
 }
 
 // resetFlags puts every flag in a command tree back at its default. A cobra
-// command is one object for the process, so a flag one test sets stays set for
-// the next one: that is how a test asserting "this flag is missing" passed
-// only while it ran before the test that supplies the flag.
+// command is a single object shared by the process, so a flag a test sets stays
+// set for whatever runs next: that is how a test asserting "this flag is
+// missing" passed only while it ran ahead of the test that supplies the flag.
 func resetFlags(c *cobra.Command) {
 	c.Flags().VisitAll(func(f *pflag.Flag) {
 		f.Value.Set(f.DefValue)
@@ -47,7 +47,7 @@ func runRoot(t *testing.T, args ...string) error {
 }
 
 // suppressStdout points os.Stdout at a temp file for the rest of the test. The
-// caller holds the CLI lock, because os.Stdout is one value for the process.
+// caller holds the CLI lock, because os.Stdout belongs to the whole process.
 func suppressStdout(t *testing.T) {
 	t.Helper()
 	old := os.Stdout

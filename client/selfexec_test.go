@@ -20,7 +20,7 @@ func TestSelfCommandRunsThroughAShell(t *testing.T) {
 }
 
 // The argv has to survive the shell as separate words: a binary path or an
-// argument with a space in it must not split, and neither must an empty one.
+// argument with a space in it must not split, and neither must an empty arg.
 func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
 	dir := t.TempDir()
 	self := filepath.Join(dir, "print args")
@@ -37,8 +37,8 @@ func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
 // alone reports "exec format error" on the same file. see docs/ape.md
 func TestSelfCommandStartsAFileExecveRejects(t *testing.T) {
 	dir := t.TempDir()
-	// No #! line and no ELF header, so execve(2) answers ENOEXEC -- the same
-	// answer it gives for an APE header. A shell reads it as a script instead.
+	// No #! line and no ELF header, so execve answers ENOEXEC -- the same answer
+	// it gives for an APE header. A shell reads it as a script instead.
 	self := filepath.Join(dir, "noexec-header")
 	require.NoError(t, os.WriteFile(self, []byte("echo started \"$1\"\n"), 0755))
 

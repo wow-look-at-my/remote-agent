@@ -41,8 +41,8 @@ type Daemon struct {
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
 	mounts       mountRegistry  // filesystem mounts this daemon owns
 	streamFunc   streamStarter  // test seam for opening a mount's transport
-	// Idle tuning and process exit. Zero means the default; a test gives its
-	// own daemon the values it needs instead of writing a package global.
+	// Idle tuning and process exit. An unset field means the default; a test
+	// gives its own daemon the values it needs, not a package global.
 	idleTimeout       time.Duration
 	idleCheckInterval time.Duration
 	exit              func(int)

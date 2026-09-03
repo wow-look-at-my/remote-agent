@@ -6,15 +6,15 @@ import (
 	"time"
 )
 
-// A remote command that never finishes must not hold its caller forever: one
-// MCP server answers requests in arrival order, so a single wedged command
-// takes the whole session with it. Every transport therefore runs a command
-// under a bound and tears the session down when it expires.
+// A remote command that never finishes must not hold its caller forever: the
+// MCP server answers requests in arrival order, so a wedged command takes the
+// whole session with it. Every transport therefore runs a command under a bound
+// and tears the session down when it expires.
 
 // ErrTimeout reports a command abandoned at its deadline.
 var ErrTimeout = errors.New("timed out")
 
-// CommandResult is one finished command, as the Runner methods return it.
+// CommandResult is a finished command, as the Runner methods return it.
 type CommandResult struct {
 	Stdout   []byte
 	Stderr   []byte
@@ -25,9 +25,9 @@ type CommandResult struct {
 	Started bool
 }
 
-// bounded runs one command through run and gives up after d, calling abort so
-// the session is torn down rather than left holding a slot. A d of zero or
-// less runs it unbounded. On expiry the abandoned run drains into the buffered
+// bounded runs a command through run and gives up after d, calling abort so
+// the session is torn down rather than left holding a slot. A d that is not
+// positive runs it unbounded. On expiry the abandoned run drains into the buffered
 // channel; nothing waits for it, because the point of the deadline is that the
 // command may never end.
 func bounded(d time.Duration, abort func(), run func() CommandResult) CommandResult {
