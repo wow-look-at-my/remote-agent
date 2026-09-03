@@ -62,8 +62,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			if err == io.EOF {
 				return nil
 			}
-			// A malformed message has no id to answer and leaves the stream
-			// unparseable.
+			// A malformed message has no id to answer.
 			return fmt.Errorf("decode request: %w", err)
 		}
 		if req.ID == nil {

@@ -99,8 +99,7 @@ func (s *fsServer) handle(req *fswire.Request, payload []byte) (*fswire.Response
 		}
 		resp.Target = target
 	case fswire.OpOpen, fswire.OpCreate:
-		// O_APPEND goes: pwrite ignores an offset on it. see
-		// docs/mount/behaviour.md
+		// O_APPEND goes: pwrite ignores an offset on it.
 		flags := fswire.LocalOpenFlags(req.Flags) &^ os.O_APPEND
 		if req.Op == fswire.OpCreate {
 			flags |= os.O_CREATE

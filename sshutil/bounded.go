@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-// A remote command that never finishes must not hold its caller forever: the
-// MCP server answers requests in arrival order, so a wedged command takes the
-// whole session with it. Every transport therefore runs a command under a
-// bound and tears the session down when it expires.
-
 // ErrTimeout reports a command abandoned at its deadline.
 var ErrTimeout = errors.New("timed out")
 

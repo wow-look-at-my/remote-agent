@@ -30,6 +30,7 @@ func captureStdout(t *testing.T, fn func()) []byte {
 }
 
 func TestPrintReadTextPlain(t *testing.T) {
+	t.Serial()
 	out := captureStdout(t, func() {
 		err := printTextResponse(map[string]any{"content": "hello\n", "size": float64(6)}, "read")
 		assert.Nil(t, err)
@@ -38,6 +39,7 @@ func TestPrintReadTextPlain(t *testing.T) {
 }
 
 func TestPrintReadTextBinary(t *testing.T) {
+	t.Serial()
 	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80}
 	out := captureStdout(t, func() {
 		err := printTextResponse(map[string]any{
@@ -50,6 +52,7 @@ func TestPrintReadTextBinary(t *testing.T) {
 }
 
 func TestPrintReadTextBadB64(t *testing.T) {
+	t.Serial()
 	captureStdout(t, func() {
 		err := printTextResponse(map[string]any{"content_b64": "!!!"}, "read")
 		assert.NotNil(t, err)

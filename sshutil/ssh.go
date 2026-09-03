@@ -173,8 +173,7 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	// Read the interval here, not in the goroutine: tests mutate the package
-	// var.
+	// Read the interval here: a test mutates the package var.
 	go keepAlive(client, keepAliveInterval)
 
 	return &ConnResult{

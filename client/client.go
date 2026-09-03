@@ -42,8 +42,7 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 	if startErr != nil {
 		return nil, startErr
 	}
-	// Pinned, so a long-lived client stops re-resolving on every later
-	// untargeted
+	// Pinned, so a long-lived client stops re-resolving.
 	resolvedSocket = sockPath
 	return sendRequestTo(sockPath, req)
 }

@@ -50,6 +50,7 @@ func startCapturingDaemon(t *testing.T) (<-chan protocol.DaemonRequest, func()) 
 }
 
 func TestWriteBinaryUsesB64Framing(t *testing.T) {
+	t.Serial()
 	reqs, cleanup := startCapturingDaemon(t)
 	defer cleanup()
 
@@ -70,6 +71,7 @@ func TestWriteBinaryUsesB64Framing(t *testing.T) {
 }
 
 func TestWriteTextUsesPlainContent(t *testing.T) {
+	t.Serial()
 	reqs, cleanup := startCapturingDaemon(t)
 	defer cleanup()
 

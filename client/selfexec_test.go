@@ -13,6 +13,7 @@ import (
 )
 
 func TestSelfCommandRunsThroughAShell(t *testing.T) {
+	t.Serial()
 	name, argv := SelfCommand("/opt/remote-agent", "connect", "root@host")
 	assert.Equal(t, "/bin/sh", name)
 	require.FileExists(t, name)
@@ -22,6 +23,7 @@ func TestSelfCommandRunsThroughAShell(t *testing.T) {
 // The argv has to survive the shell as separate words: a binary path or an
 // argument with a space in it must not split, and neither must an empty arg.
 func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
+	t.Serial()
 	dir := t.TempDir()
 	self := filepath.Join(dir, "print args")
 	require.NoError(t, os.WriteFile(self, []byte("#!/bin/sh\nfor a in \"$@\"; do echo \"[$a]\"; done\n"), 0755))
@@ -36,6 +38,7 @@ func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
 // is how a Cosmopolitan APE starts on a host with no APE binfmt entry.
 // os/exec alone reports "exec format error" on the same file. see docs/ape.md
 func TestSelfCommandStartsAFileExecveRejects(t *testing.T) {
+	t.Serial()
 	dir := t.TempDir()
 	// No #!
 	self := filepath.Join(dir, "noexec-header")

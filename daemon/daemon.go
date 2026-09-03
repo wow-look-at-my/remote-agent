@@ -119,8 +119,7 @@ func PIDPath(target string) string {
 // StartOptions configures a daemon.
 type StartOptions struct {
 	Target string // [user@]host[:port], or a ~/.ssh/config Host alias
-	// Port joins the identity like a port in the target; disagreeing ports
-	// error.
+	// Port joins the identity; a port that disagrees is an error.
 	Port int
 	// ControlPath makes that master mandatory.
 	ControlPath string
@@ -147,8 +146,7 @@ func Start(opts StartOptions) error {
 		return nil
 	}
 
-	// ssh -G fills in only what the caller left out. see
-	// docs/daemon/lifecycle.md
+	// ssh -G fills in only what the caller left out.
 	controlPath, requireControl := opts.ControlPath, opts.ControlPath != ""
 	if cfg := sshutil.ResolveSSHConfig(ep.User, host, port); cfg != nil {
 		if cfg.HostName != "" {

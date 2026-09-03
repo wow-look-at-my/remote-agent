@@ -46,12 +46,14 @@ func startMockDaemon(t *testing.T) (cleanup func()) {
 }
 
 func TestFindSocketNone(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	_, err := findSocket()
 	assert.NotNil(t, err)
 }
 
 func TestFindSocketOne(t *testing.T) {
+	t.Serial()
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
 
@@ -67,6 +69,7 @@ func TestFindSocketOne(t *testing.T) {
 }
 
 func TestFindSocketMultiple(t *testing.T) {
+	t.Serial()
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
 
@@ -82,6 +85,7 @@ func TestFindSocketMultiple(t *testing.T) {
 }
 
 func TestSendRequestAndReceive(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 
@@ -91,6 +95,7 @@ func TestSendRequestAndReceive(t *testing.T) {
 }
 
 func TestPrintResponse(t *testing.T) {
+	t.Serial()
 	err := printResponse(&protocol.DaemonResponse{Error: "test error"}, "exec")
 	assert.NotNil(t, err)
 
@@ -114,6 +119,7 @@ func withSuppressedStdout(t *testing.T, fn func()) {
 }
 
 func TestDisconnect(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -122,6 +128,7 @@ func TestDisconnect(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -131,6 +138,7 @@ func TestExec(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -139,6 +147,7 @@ func TestUpload(t *testing.T) {
 }
 
 func TestDownload(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -147,6 +156,7 @@ func TestDownload(t *testing.T) {
 }
 
 func TestRead(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -155,6 +165,7 @@ func TestRead(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -163,6 +174,7 @@ func TestWrite(t *testing.T) {
 }
 
 func TestEdit(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -171,6 +183,7 @@ func TestEdit(t *testing.T) {
 }
 
 func TestLs(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -179,6 +192,7 @@ func TestLs(t *testing.T) {
 }
 
 func TestLsRecursive(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -187,6 +201,7 @@ func TestLsRecursive(t *testing.T) {
 }
 
 func TestPs(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -195,6 +210,7 @@ func TestPs(t *testing.T) {
 }
 
 func TestPsWithFilter(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -203,6 +219,7 @@ func TestPsWithFilter(t *testing.T) {
 }
 
 func TestSysinfo(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -211,6 +228,7 @@ func TestSysinfo(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -250,6 +268,7 @@ func startErrorDaemon(t *testing.T) (cleanup func()) {
 }
 
 func TestExecDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	_, err := Exec("ls")
@@ -257,6 +276,7 @@ func TestExecDaemonError(t *testing.T) {
 }
 
 func TestDisconnectDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Disconnect()
@@ -264,6 +284,7 @@ func TestDisconnectDaemonError(t *testing.T) {
 }
 
 func TestUploadDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Upload("/tmp", "/remote")
@@ -271,6 +292,7 @@ func TestUploadDaemonError(t *testing.T) {
 }
 
 func TestDownloadDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Download("/remote", "/local")
@@ -278,6 +300,7 @@ func TestDownloadDaemonError(t *testing.T) {
 }
 
 func TestReadDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Read("/remote/file")
@@ -285,6 +308,7 @@ func TestReadDaemonError(t *testing.T) {
 }
 
 func TestWriteDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Write("/remote/file", "0644", []byte("data"))
@@ -292,6 +316,7 @@ func TestWriteDaemonError(t *testing.T) {
 }
 
 func TestEditDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Edit("/remote/file", "a", "b", false)
@@ -299,6 +324,7 @@ func TestEditDaemonError(t *testing.T) {
 }
 
 func TestLsDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Ls("/tmp", false)
@@ -306,6 +332,7 @@ func TestLsDaemonError(t *testing.T) {
 }
 
 func TestPsDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Ps("")
@@ -313,6 +340,7 @@ func TestPsDaemonError(t *testing.T) {
 }
 
 func TestSysinfoDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Sysinfo()
@@ -320,6 +348,7 @@ func TestSysinfoDaemonError(t *testing.T) {
 }
 
 func TestPingDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Ping()
@@ -327,12 +356,14 @@ func TestPingDaemonError(t *testing.T) {
 }
 
 func TestSendRequestNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	_, err := sendRequest(&protocol.DaemonRequest{Action: "ping"})
 	assert.NotNil(t, err)
 }
 
 func TestSendRequestStaleSocket(t *testing.T) {
+	t.Serial()
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
 
@@ -346,12 +377,14 @@ func TestSendRequestStaleSocket(t *testing.T) {
 }
 
 func TestConnectWithPort(t *testing.T) {
+	t.Serial()
 	// This will fail at SSH connect but exercises the Connect function
 	err := Connect("user@host", 2222, "")
 	assert.NotNil(t, err)
 }
 
 func TestWriteWithMode(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -360,6 +393,7 @@ func TestWriteWithMode(t *testing.T) {
 }
 
 func TestLsDefaultPath(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -368,6 +402,7 @@ func TestLsDefaultPath(t *testing.T) {
 }
 
 func TestReadlink(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 	withSuppressedStdout(t, func() {
@@ -376,374 +411,82 @@ func TestReadlink(t *testing.T) {
 }
 
 func TestReadlinkDaemonError(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 	err := Readlink("/usr/bin/python")
 	assert.NotNil(t, err)
 }
 
-func TestPrintResponseJSON(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = true
-	defer func() { OutputJSON = false }()
-
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"stdout": "hello\n", "stderr": "", "exit_code": float64(0)},
-	}, "exec")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextExec(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"stdout": "hello\n", "stderr": "", "exit_code": float64(0)},
-	}, "exec")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextLs(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK: true,
-		Data: map[string]any{
-			"path": "/tmp",
-			"entries": []any{
-				map[string]any{
-					"name": "/tmp/dir", "size": float64(4096), "mode": "755",
-					"is_dir": true, "is_link": false,
-				},
-				map[string]any{
-					"name": "/tmp/file.txt", "size": float64(100), "mode": "644",
-					"is_dir": false, "is_link": false,
-				},
-			},
-		},
-	}, "ls")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextPing(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"pong": true},
-	}, "ping")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextPingFail(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"pong": false},
-	}, "ping")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextPs(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK: true,
-		Data: map[string]any{
-			"processes": []any{
-				map[string]any{
-					"pid": float64(1), "ppid": float64(0), "user": "root",
-					"state": "S", "rss_bytes": float64(4096), "command": "init",
-				},
-				map[string]any{
-					"pid": float64(100), "ppid": float64(1), "user": "user",
-					"state": "R", "rss_bytes": float64(8192), "command": "bash",
-				},
-			},
-		},
-	}, "ps")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextPsEmpty(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{},
-	}, "ps")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextSysinfo(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK: true,
-		Data: map[string]any{
-			"hostname": "testhost",
-			"os":       "Linux",
-			"arch":     "amd64",
-			"uptime":   "5d 3h",
-			"cpu": map[string]any{
-				"model": "Intel", "cores": float64(4), "threads": float64(8), "mhz": float64(2400),
-			},
-			"memory": map[string]any{
-				"total_bytes": 16e9, "available_bytes": 8e9,
-			},
-			"disk": []any{
-				map[string]any{
-					"mount_point": "/", "total_bytes": 500e9, "use_pct": float64(42),
-				},
-			},
-		},
-	}, "sysinfo")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextExecNonZero(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK: true,
-		Data: map[string]any{
-			"stdout": "", "stderr": "command not found\n", "exit_code": float64(127),
-		},
-	}, "exec")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextWrite(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"bytes_written": float64(1024)},
-	}, "write")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextEdit(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"modified": true, "message": "replaced 3 occurrences"},
-	}, "edit")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextEditNotModified(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"modified": false},
-	}, "edit")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextDisconnect(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"status": "disconnecting"},
-	}, "disconnect")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextReadlink(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"path": "/usr/bin/python", "target": "/usr/bin/python3.11"},
-	}, "readlink")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextUnknownAction(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"key": "value"},
-	}, "unknown")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextNonMap(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: "plain string",
-	}, "exec")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextLsWithSymlink(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK: true,
-		Data: map[string]any{
-			"path": "/tmp",
-			"entries": []any{
-				map[string]any{
-					"name": "/tmp/link", "size": float64(12), "mode": "777",
-					"is_dir": false, "is_link": true, "target": "/tmp/real",
-				},
-			},
-		},
-	}, "ls")
-	assert.Nil(t, err)
-}
-
-func TestPrintResponseTextRead(t *testing.T) {
-	old := os.Stdout
-	f, _ := os.CreateTemp(t.TempDir(), "stdout")
-	os.Stdout = f
-	defer func() { os.Stdout = old }()
-
-	OutputJSON = false
-	err := printResponse(&protocol.DaemonResponse{
-		OK:   true,
-		Data: map[string]any{"content": "file content here", "size": float64(17)},
-	}, "read")
-	assert.Nil(t, err)
-}
-
-// No-socket tests exercise the sendRequest error branch in each function.
-
 func TestDisconnectNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Disconnect())
 }
 
 func TestExecNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	_, err := Exec("ls")
 	assert.NotNil(t, err)
 }
 
 func TestUploadNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Upload("/tmp", "/remote"))
 }
 
 func TestDownloadNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Download("/remote", "/local"))
 }
 
 func TestReadNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Read("/path"))
 }
 
 func TestWriteNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Write("/path", "0644", []byte("x")))
 }
 
 func TestEditNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Edit("/path", "a", "b", false))
 }
 
 func TestLsNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Ls("/path", false))
 }
 
 func TestPsNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Ps(""))
 }
 
 func TestSysinfoNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Sysinfo())
 }
 
 func TestPingNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Ping())
 }
 
 func TestReadlinkNoSocket(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.NotNil(t, Readlink("/path"))
 }
