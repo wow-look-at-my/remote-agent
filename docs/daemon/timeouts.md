@@ -30,7 +30,7 @@ keeps running there. Nothing this side can promise otherwise.
 | default | `protocol.ExecDefaultTimeout` |
 | maximum | `protocol.ExecMaxTimeout` |
 | MCP | the `timeout` argument on `run_command`, in seconds |
-| CLI and the claude shim | `REMOTE_AGENT_TIMEOUT`, in seconds |
+| CLI | `REMOTE_AGENT_TIMEOUT`, in seconds |
 
 The MCP argument is per call because a model cannot restart its own server: a
 deadline that could only be set when the server started would not exist for it

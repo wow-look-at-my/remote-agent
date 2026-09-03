@@ -10,9 +10,8 @@ import (
 )
 
 // mcpCmd serves the remote filesystem toolset over the MCP stdio transport.
-// `remote-agent claude` registers this command as an MCP server so Claude's
-// file tools operate on the remote host; it can also be wired into any other
-// MCP client by hand (see README).
+// A client is configured to spawn it; the README has the command form, which
+// names a shell because a release is an APE (see docs/ape.md).
 var mcpCmd = &cobra.Command{
 	Use:   "mcp [user@host[:port]]",
 	Short: "Serve remote command and filesystem tools to an MCP client over stdio",

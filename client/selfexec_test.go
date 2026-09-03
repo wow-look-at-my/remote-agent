@@ -15,6 +15,7 @@ import (
 func TestSelfCommandRunsThroughAShell(t *testing.T) {
 	name, argv := SelfCommand("/opt/remote-agent", "connect", "root@host")
 	assert.Equal(t, "/bin/sh", name)
+	require.FileExists(t, name)
 	assert.Equal(t, []string{"-c", shellExecScript, "/opt/remote-agent", "connect", "root@host"}, argv)
 }
 

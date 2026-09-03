@@ -42,19 +42,6 @@ func TestExecuteExecNoSocket(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestExecuteClaudeTooManyArgs(t *testing.T) {
-	rootCmd.SetArgs([]string{"claude", "user@host", "extra"})
-	err := rootCmd.Execute()
-	assert.NotNil(t, err) // second positional is rejected; claude flags go after --
-}
-
-func TestExecuteClaudeNoTargetNoDaemon(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-	rootCmd.SetArgs([]string{"claude"})
-	err := rootCmd.Execute()
-	assert.NotNil(t, err) // no target given and no daemon running
-}
-
 func TestExecuteDisconnectNoSocket(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	rootCmd.SetArgs([]string{"disconnect"})

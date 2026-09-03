@@ -1,12 +1,10 @@
-// Package mcpserver exposes the remote host's filesystem to Claude Code (or
-// any other MCP client) as a set of Model Context Protocol tools.
+// Package mcpserver exposes a remote host's shell and filesystem to an MCP
+// client as a set of Model Context Protocol tools.
 //
-// Claude Code's built-in Read/Write/Edit/Glob/Grep tools call Node's fs
-// directly against the machine Claude runs on; unlike the Bash tool they have
-// no shell-prefix hook, so there is no way to redirect them at the remote
-// host. `remote-agent claude` therefore turns the built-ins off and registers
-// this server in their place, so every file operation the model performs
-// lands on the remote machine that its shell commands already run on.
+// A model's own file tools read the machine it runs on. These tools are how it
+// reaches another one: every call names the host it acts on, so one server
+// serves several, and a file operation lands on the same machine the shell
+// commands do.
 //
 // The transport is the MCP stdio transport: newline-delimited JSON-RPC 2.0 on
 // stdin/stdout. The server holds no state of its own -- each tool call becomes

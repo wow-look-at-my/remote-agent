@@ -31,12 +31,13 @@ has no `/bin/sh` to name):
   daemon and start one, so this is every command's failure when it breaks.
   `exec` replaces the shell, so the process the caller waits on and signals is
   still the daemon itself -- `ps` shows no shell at all.
-- **The MCP server command** in the config the `claude` launcher writes
-  (`client/launch.go`). Claude spawns that itself, and a server that cannot
-  start leaves the client waiting on a handshake that never arrives.
-
 Use `SelfCommand` for any further site. The form also works for an ordinary
 ELF binary, so nothing has to know which kind of build it is.
+
+An MCP client spawns `remote-agent mcp` the same way, from its own config, and
+that config is the user's to write -- so the README shows the shell form. A
+server that cannot start leaves the client waiting on a handshake that never
+arrives, which is the worst shape this failure takes.
 
 ## The remote host needs nothing extra
 
