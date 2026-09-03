@@ -7,7 +7,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Stream is the mount's transport, on its own SSH channel. see docs/ssh/connection.md
+// Stream is the mount's transport, on its own SSH channel. see
+// docs/ssh/connection.md
 type Stream struct {
 	session *ssh.Session
 	stdin   io.WriteCloser
@@ -50,7 +51,8 @@ func (s *Stream) Read(p []byte) (int, error) { return s.stdout.Read(p) }
 
 // Close ends the remote command and releases the SSH channel.
 func (s *Stream) Close() error {
-	// EOF lets a well-behaved helper exit. The session close reclaims the channel regardless.
+	// EOF lets a well-behaved helper exit. The session close reclaims the
+	// channel regardless.
 	s.stdin.Close()
 	return s.session.Close()
 }

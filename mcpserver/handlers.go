@@ -10,9 +10,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// The tool handlers: each turns one call into a daemon request against the
-// target the call named, then renders the reply for a model to read. The
-// declarations they are attached to live in tools.go.
+// The declarations they are attached to live in tools.go.
 
 func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
 	route, err := s.route(args)
@@ -53,9 +51,6 @@ func (s *Server) readFile(args map[string]any) ([]contentBlock, error) {
 	return text(numberLines(string(data), offset, limit)), nil
 }
 
-// numberLines renders a window of a file the way a reader expects to quote it
-// back: 1-based line numbers, tab-separated, with an explicit note when the
-// window does not cover the whole file.
 func numberLines(content string, offset, limit int) string {
 	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	if offset < 1 {
@@ -156,8 +151,6 @@ func (s *Server) listDir(args map[string]any) ([]contentBlock, error) {
 	return text(formatListing(&listing)), nil
 }
 
-// formatListing renders a directory listing: one entry per line, tagged by
-// kind.
 func formatListing(listing *protocol.DirListing) string {
 	if len(listing.Entries) == 0 {
 		return fmt.Sprintf("%s is empty.", listing.Path)
@@ -176,7 +169,6 @@ func formatListing(listing *protocol.DirListing) string {
 	return b.String()
 }
 
-// exec answers with two shapes, and decoding only the first turns `ls /srv` into an empty success.
 type execReply struct {
 	protocol.ExecResult
 	protocol.DirListing
@@ -191,7 +183,6 @@ func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Each command is its own one-shot shell, so the directory must travel with it.
 	if cwd := stringArg(args, "cwd"); cwd != "" {
 		command = "cd " + shellQuote(cwd) + " && " + command
 	}
@@ -211,9 +202,7 @@ func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
 	return execOutput(&reply.ExecResult)
 }
 
-// execOutput renders a finished command. A non-zero exit is returned as an
-// error so the caller cannot read a failure as success -- the output it did
-// produce travels with it, since that is usually where the reason is.
+// execOutput renders a finished command.
 func execOutput(result *protocol.ExecResult) ([]contentBlock, error) {
 	out := strings.TrimRight(result.Stdout, "\n")
 	errOut := strings.TrimRight(result.Stderr, "\n")
@@ -253,7 +242,6 @@ func truncateOutput(s, name string) string {
 		strings.ToValidUTF8(s[:head], ""), len(s)-maxOutputBytes, name, strings.ToValidUTF8(s[len(s)-tail:], ""))
 }
 
-// shellQuote wraps a string so a POSIX shell reads it as one literal word.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -314,8 +302,8 @@ func (s *Server) grep(args map[string]any) ([]contentBlock, error) {
 	return text(formatGrep(&result)), nil
 }
 
-// formatGrep renders a grep result in the familiar grep layout: "path:line:text"
-// for matches and "path-line-text" for context lines.
+// formatGrep renders a grep result in the familiar grep layout:
+// "path:line:text" for matches and "path-line-text" for context lines.
 func formatGrep(result *protocol.GrepResult) string {
 	var b strings.Builder
 	switch result.Mode {

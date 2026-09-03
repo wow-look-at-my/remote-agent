@@ -42,7 +42,6 @@ func echoServer(t *testing.T, conn net.Conn, delay func(id uint64) time.Duration
 func TestClientMatchesRepliesToCallers(t *testing.T) {
 	clientEnd, serverEnd := net.Pipe()
 	go echoServer(t, serverEnd, func(id uint64) time.Duration {
-		// Reply to later requests first so ordering cannot be assumed.
 		return time.Duration(20-id) * time.Millisecond
 	})
 	c := New(clientEnd, clientEnd, clientEnd)
@@ -88,7 +87,8 @@ func TestClientReportsRemoteErrno(t *testing.T) {
 	c := New(clientEnd, clientEnd, clientEnd)
 	defer c.Close()
 
-	// An errno is data, not a transport failure, so Call succeeds and the caller reads it.
+	// An errno is data, not a transport failure, so Call succeeds and the caller
+	// reads it.
 	resp, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(2), resp.Errno)
@@ -99,7 +99,8 @@ func TestClientFailsCallsAfterSessionEnds(t *testing.T) {
 	clientEnd, serverEnd := net.Pipe()
 	c := New(clientEnd, clientEnd, clientEnd)
 
-	// A dead connection must fail an in-flight call. A blocked FUSE thread wedges the mount.
+	// A dead connection must fail an in-flight call. A blocked FUSE thread
+	// wedges the mount.
 	inFlight := make(chan error, 1)
 	go func() {
 		_, _, err := c.Call(&fswire.Request{Op: fswire.OpStat, Path: "x"}, nil)
@@ -141,7 +142,6 @@ func TestClientCloseIsIdempotent(t *testing.T) {
 	go echoServer(t, serverEnd, nil)
 	c := New(clientEnd, clientEnd, clientEnd)
 	assert.NoError(t, c.Close())
-	// Closing twice must not panic on the already-closed pending channels.
 	_ = c.Close()
 }
 
@@ -177,7 +177,8 @@ func TestClientAssignsUniqueIDs(t *testing.T) {
 }
 
 func TestClientWriteFailureIsReported(t *testing.T) {
-	// A stream that rejects writes, a closed SSH channel, is an error and not a lost request.
+	// A stream that rejects writes, a closed SSH channel, is an error and not a
+	// lost request.
 	c := New(brokenWriter{}, io.LimitReader(nil, 0), nil)
 	_, _, err := c.Call(&fswire.Request{Op: fswire.OpPing}, nil)
 	assert.Error(t, err)

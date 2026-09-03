@@ -9,14 +9,11 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Two spares cover the steady state: one session per command, one per audit write.
 const spareTarget = 2
 
-// 8 running plus 2 spares stays inside OpenSSH's default MaxSessions of 10.
 const maxConcurrentSessions = 8
 
-// CommandRunner keeps sessions pre-opened, because opening one costs a round trip
-// that would otherwise sit in every command's latency. see docs/ssh/connection.md
+// see docs/ssh/connection.md
 type CommandRunner struct {
 	client  *ssh.Client
 	sem     chan struct{} // bounds concurrently running commands
@@ -26,8 +23,8 @@ type CommandRunner struct {
 	closed  bool           // stop replenishing spares
 }
 
-// NewCommandRunner starts pre-opening sessions at once. Run and RunStdin are
-// safe for concurrent use, bounded at maxConcurrentSessions.
+// Run and RunStdin are safe for concurrent use, bounded at
+// maxConcurrentSessions.
 func NewCommandRunner(client *ssh.Client) *CommandRunner {
 	r := &CommandRunner{
 		client: client,
@@ -65,7 +62,8 @@ func (r *CommandRunner) run(command string, stdin []byte, timeout time.Duration)
 	}
 	res := r.execBounded(sess, command, stdin, timeout)
 	if !res.Started && fromSpare {
-		// The spare went stale before the exec, so the command never began and a retry is safe.
+		// The spare went stale before the exec, so the command never began and a
+		// retry is safe.
 		fresh, ferr := r.client.NewSession()
 		if ferr != nil {
 			return nil, nil, -1, res.Err
@@ -75,8 +73,6 @@ func (r *CommandRunner) run(command string, stdin []byte, timeout time.Duration)
 	return res.Stdout, res.Stderr, res.ExitCode, res.Err
 }
 
-// execBounded runs one command on sess under the deadline, and closes the
-// session on every path out.
 func (r *CommandRunner) execBounded(sess *ssh.Session, command string, stdin []byte, timeout time.Duration) CommandResult {
 	// Closing the session is what unblocks Wait, so an abandoned run unwinds.
 	abort := func() { sess.Signal(ssh.SIGKILL); sess.Close() }
@@ -87,8 +83,6 @@ func (r *CommandRunner) execBounded(sess *ssh.Session, command string, stdin []b
 	})
 }
 
-// takeSession returns a session for one command, preferring a pre-opened
-// spare, and kicks off replenishment in the background.
 func (r *CommandRunner) takeSession() (sess *ssh.Session, fromSpare bool, err error) {
 	r.mu.Lock()
 	if n := len(r.spares); n > 0 {
@@ -110,7 +104,6 @@ func (r *CommandRunner) takeSession() (sess *ssh.Session, fromSpare bool, err er
 }
 
 // prewarmAsync tops the spare pool back up to spareTarget in the background.
-// At most one prewarm goroutine runs at a time.
 func (r *CommandRunner) prewarmAsync() {
 	r.mu.Lock()
 	if r.closed || r.warming || len(r.spares) >= spareTarget {
@@ -143,7 +136,8 @@ func (r *CommandRunner) prewarmAsync() {
 	}()
 }
 
-// Close releases the spares. The SSH client stays open, and Run still opens sessions on demand.
+// Close releases the spares. The SSH client stays open, and Run still opens
+// sessions on demand.
 func (r *CommandRunner) Close() {
 	r.mu.Lock()
 	spares := r.spares
@@ -155,10 +149,9 @@ func (r *CommandRunner) Close() {
 	}
 }
 
-// execOnSession runs one command on an already-open session. started reports
-// whether the exec request was accepted by the server; when false the command
-// never began executing, so the caller may safely retry on another session.
-// The caller owns closing the session.
+// started reports whether the exec request was accepted by the server; when
+// false the command never began executing, so the caller may safely retry on
+// another session. The caller owns closing the session.
 func execOnSession(session *ssh.Session, command string, stdin []byte) (stdout, stderr []byte, exitCode int, started bool, err error) {
 	var outBuf, errBuf safeBuffer
 	session.Stdout = &outBuf

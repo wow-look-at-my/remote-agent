@@ -13,10 +13,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// Supervising the daemon a command runs on: starting one, waiting for it to
-// answer, and asking it to stop.
-
-// Test seams, and how long a fresh daemon has to answer before a command gives up.
+// Test seams, and how long a fresh daemon has to answer before a command
+// gives up.
 var (
 	startDaemonFunc = startDaemonProcess
 	daemonReadyWait = 30 * time.Second
@@ -31,7 +29,6 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	}
 	defer logf.Close()
 
-	// The target carries its port, so --port goes only where the record names one.
 	args := []string{"connect", rec.Target}
 	if rec.Port > 0 {
 		args = append(args, "--port", strconv.Itoa(rec.Port))
@@ -39,7 +36,8 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	if rec.ControlPath != "" {
 		args = append(args, "--control-path", rec.ControlPath)
 	}
-	// Through a shell: a release is an APE, which os/exec cannot execve. see docs/ape.md
+	// Through a shell: a release is an APE, which os/exec cannot execve. see
+	// docs/ape.md
 	name, argv := SelfCommand(self, args...)
 	cmd := exec.Command(name, argv...)
 	cmd.Stdout = logf
@@ -51,9 +49,7 @@ func startDaemonProcess(self string, rec daemon.TargetRecord, logPath string) (*
 	return cmd.Process, nil
 }
 
-// awaitDaemon waits for the daemon to answer. Given the process it was started
-// as, it gives up the moment that process exits -- a bad host or a rejected key
-// is reported in a second with the reason, instead of after the full timeout.
+// awaitDaemon waits for the daemon to answer.
 func awaitDaemon(sockPath string, proc *os.Process, logPath string, timeout time.Duration) error {
 	exited := make(chan struct{})
 	if proc != nil {
@@ -80,8 +76,9 @@ func awaitDaemon(sockPath string, proc *os.Process, logPath string, timeout time
 	}
 }
 
-// logTail returns the last few lines of the daemon log, formatted for appending
-// to an error message. The daemon reports SSH failures there and nowhere else.
+// logTail returns the last few lines of the daemon log, formatted for
+// appending to an error message. The daemon reports SSH failures there and
+// nowhere else.
 func logTail(logPath string) string {
 	const maxLines = 6
 	data, err := os.ReadFile(logPath)

@@ -42,7 +42,7 @@ func TestMatchGlob(t *testing.T) {
 		{"*.go", "main.go", true},
 		{"*.go", "src/deep/main.go", true}, // slashless patterns match the base name at any depth
 		{"*.go", "main.rs", false},
-		{"**/*.go", "main.go", true}, // ** also matches zero directories
+		{"**/*.go", "main.go", true},
 		{"**/*.go", "a/b/main.go", true},
 		{"src/*.ts", "src/app.ts", true},
 		{"src/*.ts", "src/deep/app.ts", false},

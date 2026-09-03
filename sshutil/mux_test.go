@@ -42,7 +42,6 @@ func startFakeMaster(t *testing.T, m *fakeMaster) *fakeMaster {
 	if m.helloVersion == 0 {
 		m.helloVersion = muxVersion
 	}
-	// A socket path is capped near 100 bytes, which t.TempDir() can exceed.
 	dir, err := os.MkdirTemp("", "muxtest")
 	require.NoError(t, err)
 	m.path = filepath.Join(dir, "master.sock")
@@ -101,8 +100,6 @@ func (m *fakeMaster) serve(conn *net.UnixConn) {
 	}
 }
 
-// serveSession parses a session request, collects the three descriptors, runs
-// the command on them and reports its exit status.
 func (m *fakeMaster) serveSession(conn *net.UnixConn, rid uint32, r *muxReader) {
 	r.str()           // reserved
 	tty, _ := r.u32() // want tty
@@ -174,7 +171,6 @@ func (m *fakeMaster) serveSession(conn *net.UnixConn, rid uint32, r *muxReader) 
 	}
 }
 
-// recvFD reads one descriptor sent as OpenSSH's mm_send_fd sends it.
 func recvFD(conn *net.UnixConn, name string) (*os.File, error) {
 	buf := make([]byte, 1)
 	oob := make([]byte, unix.CmsgSpace(4))
@@ -220,7 +216,8 @@ func TestControlMasterStdin(t *testing.T) {
 	c, err := DialControlMaster(startFakeMaster(t, nil).path)
 	require.NoError(t, err)
 
-	// Binary and larger than a socket buffer, like the helper the deploy path ships.
+	// Binary and larger than a socket buffer, like the helper the deploy path
+	// ships.
 	payload := make([]byte, 1<<20)
 	for i := range payload {
 		payload[i] = byte(i)
@@ -300,8 +297,6 @@ func TestControlMasterRefusesSession(t *testing.T) {
 	assert.ErrorContains(t, err, "no more sessions")
 }
 
-// A master that goes away mid-command must report a failure, never a
-// zero exit code the caller would read as success.
 func TestControlMasterWithoutExitStatusFails(t *testing.T) {
 	m := startFakeMaster(t, &fakeMaster{dropExitMessage: true})
 	c, err := DialControlMaster(m.path)
@@ -317,7 +312,6 @@ func TestControlMasterAlive(t *testing.T) {
 	assert.True(t, ControlMasterAlive(startFakeMaster(t, nil).path))
 }
 
-// Connect prefers a live control master and reports which one it used.
 func TestConnectViaControlMaster(t *testing.T) {
 	m := startFakeMaster(t, nil)
 	conn, err := Connect(ConnectOptions{Host: "example.invalid", Port: 22, User: "root", ControlPath: m.path})
@@ -331,8 +325,6 @@ func TestConnectViaControlMaster(t *testing.T) {
 	assert.Equal(t, "via-master\n", string(stdout))
 }
 
-// An explicitly requested master that is not there fails the connect: the
-// caller asked for that connection, not for a second one to be opened.
 func TestConnectRequiredControlMasterMissing(t *testing.T) {
 	_, err := Connect(ConnectOptions{
 		Host:           "127.0.0.1",
@@ -344,11 +336,6 @@ func TestConnectRequiredControlMasterMissing(t *testing.T) {
 	assert.ErrorContains(t, err, "control master requested but unusable")
 }
 
-// TestLiveControlMaster runs against a real OpenSSH master rather than the
-// fake one above -- the only check that proves this client matches OpenSSH's
-// own implementation rather than this file's reading of PROTOCOL.mux. CI has
-// no SSH host, so it is opt-in; docs/ssh/control-sockets.md has the two
-// commands that set one up.
 func TestLiveControlMaster(t *testing.T) {
 	path := os.Getenv("REMOTE_AGENT_LIVE_CONTROL_PATH")
 	if path == "" {

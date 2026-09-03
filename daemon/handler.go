@@ -4,7 +4,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// Handler processes daemon requests by dispatching to the appropriate operation.
+// Handler processes daemon requests by dispatching to the appropriate
+// operation.
 type Handler struct {
 	daemon *Daemon
 }

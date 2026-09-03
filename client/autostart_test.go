@@ -15,8 +15,6 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// isolate gives a test its own TempDir and resets the process-wide daemon
-// selection state, so auto-start in one test cannot leak into the next.
 func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -58,8 +56,6 @@ func listenAt(t *testing.T, sockPath string) {
 	}()
 }
 
-// stubStart replaces the daemon launcher with one that just starts a mock
-// daemon at the socket the real one would have created, and records the call.
 func stubStart(t *testing.T, calls *[]daemon.TargetRecord) {
 	t.Helper()
 	prev := startDaemonFunc
@@ -77,7 +73,7 @@ func TestResolveTargetFromFlag(t *testing.T) {
 	rec, err := resolveTarget()
 	require.NoError(t, err)
 	assert.Equal(t, "root@flag-host", rec.Target)
-	// A target naming no port keeps none. ssh_config, else 22, decides on connect.
+	// A target naming no port keeps none.
 	assert.Equal(t, 0, rec.Port)
 }
 
@@ -99,7 +95,6 @@ func TestResolveTargetPortFromRecordAndEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2222, rec.Port)
 
-	// A port from the environment keys its own daemon, and never redirects the one above.
 	TargetOverride = "root@host"
 	t.Setenv("REMOTE_AGENT_PORT", "2022")
 	rec, err = resolveTarget()
@@ -277,7 +272,8 @@ func TestSendRequestForStartsDaemonForNamedTarget(t *testing.T) {
 
 func TestSendRequestForIgnoresProcessWideSelection(t *testing.T) {
 	isolate(t)
-	// A live daemon this process is pinned to. A call naming its own target must miss it.
+	// A live daemon this process is pinned to. A call naming its own target must
+	// miss it.
 	other := daemon.SocketPath("root@other")
 	listenAt(t, other)
 	t.Setenv("REMOTE_AGENT_SOCKET", other)
@@ -363,8 +359,6 @@ func TestDefaultTargetPrecedence(t *testing.T) {
 	assert.Equal(t, "root@flag-host", got)
 }
 
-// A default target the MCP server hands to every call must carry the port, or
-// the calls land on whichever endpoint of that host connected first.
 func TestDefaultTargetKeepsPort(t *testing.T) {
 	isolate(t)
 	TargetOverride = "root@127.0.0.1:2201"
@@ -398,9 +392,6 @@ func TestTargetKeyFoldsPorts(t *testing.T) {
 	assert.Empty(t, key)
 }
 
-// The defect this fixes: two endpoints reachable as root@127.0.0.1 on
-// different ports shared one daemon, so every call went to whichever one
-// started first.
 func TestPortedTargetsGetTheirOwnDaemon(t *testing.T) {
 	isolate(t)
 	var calls []daemon.TargetRecord
@@ -419,8 +410,6 @@ func TestPortedTargetsGetTheirOwnDaemon(t *testing.T) {
 	assert.NotEqual(t, daemon.SocketPath(calls[0].Target), daemon.SocketPath(calls[1].Target))
 }
 
-// A daemon on one port must not answer a call meant for another port on the
-// same host, even while it is running.
 func TestRunningDaemonDoesNotServeAnotherPort(t *testing.T) {
 	isolate(t)
 	var calls []daemon.TargetRecord
@@ -434,8 +423,8 @@ func TestRunningDaemonDoesNotServeAnotherPort(t *testing.T) {
 	assert.Equal(t, "root@127.0.0.1:2202", calls[0].Target)
 }
 
-// A record written before the port joined the target keeps its port in a field
-// of its own. Restarting that daemon has to reach the same endpoint.
+// A record written before the port joined the target keeps its port in a
+// field of its own. Restarting that daemon has to reach the same endpoint.
 func TestLegacyRecordPortFoldsIntoTheKey(t *testing.T) {
 	isolate(t)
 	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{
@@ -464,8 +453,8 @@ func TestSendRequestForStartsDaemonThroughControlMaster(t *testing.T) {
 		"the control socket the call named must reach the daemon being started")
 }
 
-// A daemon that idled out is restarted through the same control master it used
-// before, without the caller having to name it again.
+// A daemon that idled out is restarted through the same control master it
+// used before, without the caller having to name it again.
 func TestControlPathRememberedAcrossRestarts(t *testing.T) {
 	isolate(t)
 	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{
@@ -489,12 +478,9 @@ func TestControlPathFromFlagAndEnv(t *testing.T) {
 	t.Cleanup(func() { ControlPathOverride = "" })
 	assert.Equal(t, "/tmp/flag.sock", ControlPathFor(protocol.Route{}))
 
-	// A call that names its own beats both: one server, several hosts.
 	assert.Equal(t, "/tmp/call.sock", ControlPathFor(protocol.Route{ControlPath: "/tmp/call.sock"}))
 }
 
-// A running daemon cannot be re-pointed at another control master, so a call
-// naming a different one must fail rather than run on the wrong connection.
 func TestCallThroughDifferentControlMasterIsRefused(t *testing.T) {
 	isolate(t)
 	require.NoError(t, daemon.WriteTargetRecord(daemon.TargetRecord{

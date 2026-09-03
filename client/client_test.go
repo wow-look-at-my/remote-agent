@@ -12,7 +12,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// startMockDaemon creates a mock daemon that accepts connections and responds with okData.
+// startMockDaemon creates a mock daemon that accepts connections and responds
+// with okData.
 func startMockDaemon(t *testing.T) (cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()

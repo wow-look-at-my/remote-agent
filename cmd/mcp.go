@@ -9,8 +9,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// mcpCmd serves the remote filesystem toolset over the MCP stdio transport.
-// A client is configured to spawn it; the README has the command form, which
+// mcpCmd serves the remote filesystem toolset over the MCP stdio transport. A
+// client is configured to spawn it; the README has the command form, which
 // names a shell because a release is an APE (see docs/ape.md).
 var mcpCmd = &cobra.Command{
 	Use:   "mcp [user@host[:port]]",

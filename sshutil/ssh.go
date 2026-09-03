@@ -24,12 +24,13 @@ type SSHConfig struct {
 	HostName string
 	User     string
 	Port     int
-	// This host's control-master socket, already expanded by `ssh -G`. Empty when there is none.
+	// This host's control-master socket, already expanded by `ssh -G`. Empty
+	// when there is none.
 	ControlPath string
 }
 
-// A test seam. The -l and -p arguments matter: ssh expands a ControlPath's %r and
-// %p tokens from them. see docs/ssh/connection.md
+// A test seam. The -l and -p arguments matter: ssh expands a ControlPath's %r
+// and %p tokens from them. see docs/ssh/connection.md
 var sshGCommand = func(user, host string, port int) *exec.Cmd {
 	args := []string{"-G"}
 	if port > 0 {
@@ -41,11 +42,10 @@ var sshGCommand = func(user, host string, port int) *exec.Cmd {
 	return exec.Command("ssh", append(args, host)...)
 }
 
-// ResolveSSHConfig runs `ssh -G <host>` and parses the effective hostname, user,
-// and port for the given host (resolving any ~/.ssh/config Host alias). user and
-// port are the ones the target named, empty and 0 when it named none. It
-// returns nil if ssh is unavailable or the command fails. Unknown keys and an
-// unparseable port are silently ignored.
+// ResolveSSHConfig runs `ssh -G <host>` and parses the effective hostname,
+// user, and port for the given host (resolving any ~/.ssh/config Host alias).
+// It returns nil if ssh is unavailable or the command fails. Unknown keys and
+// an unparseable port are silently ignored.
 func ResolveSSHConfig(user, host string, port int) *SSHConfig {
 	out, err := sshGCommand(user, host, port).Output()
 	if err != nil {
@@ -79,14 +79,11 @@ func ResolveSSHConfig(user, host string, port int) *SSHConfig {
 }
 
 // Conn is the transport commands run over: an SSH connection this process
-// dialed and authenticated, or an OpenSSH control master's socket. The daemon
-// holds one and does not care which it got.
+// dialed and authenticated, or an OpenSSH control master's socket.
 type Conn interface {
 	Run(command string) (stdout, stderr []byte, exitCode int, err error)
 	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
-	// A command the caller gives up on after d, rather than waiting on one that never ends.
 	RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error)
-	// A command whose stdin and stdout stay open as one byte stream, for the mount.
 	StartStream(command string) (io.ReadWriteCloser, error)
 	Close() error
 }
@@ -107,9 +104,9 @@ type ConnectOptions struct {
 	Host string
 	Port int
 	User string
-	// A control master to run commands through, instead of a second connection. Empty dials.
+	// Empty dials.
 	ControlPath string
-	// Makes an unusable ControlPath an error. A caller that named one gets it or a failure.
+	// Makes an unusable ControlPath an error.
 	RequireControl bool
 }
 
@@ -130,13 +127,6 @@ func (c *sshConn) Close() error {
 	return c.client.Close()
 }
 
-// Connect returns a transport for the host: the configured control master
-// when one is answering, otherwise a freshly dialed and authenticated SSH
-// connection.
-//
-// Riding an existing master is what makes remote-agent usable on hosts this
-// process cannot authenticate to on its own -- one-time passwords, hardware
-// keys, an agent held by another session -- because the master already did it.
 func Connect(opts ConnectOptions) (*ConnResult, error) {
 	host, port, user := opts.Host, opts.Port, opts.User
 	if port == 0 {
@@ -157,7 +147,6 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		if opts.RequireControl {
 			return nil, fmt.Errorf("control master requested but unusable: %w", err)
 		}
-		// Dialing is right here, but a silent second connection is what confuses people.
 		fmt.Fprintf(os.Stderr, "Control socket %s is not answering (%v); connecting directly instead.\n", opts.ControlPath, err)
 	}
 
@@ -185,7 +174,8 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	// Read the interval here, not in the goroutine: tests mutate the package var.
+	// Read the interval here, not in the goroutine: tests mutate the package
+	// var.
 	go keepAlive(client, keepAliveInterval)
 
 	return &ConnResult{
@@ -197,7 +187,8 @@ func Connect(opts ConnectOptions) (*ConnResult, error) {
 	}, nil
 }
 
-// RunCommand opens a new SSH session, runs a command, and returns stdout+stderr+exit code.
+// RunCommand opens a new SSH session, runs a command, and returns
+// stdout+stderr+exit code.
 func RunCommand(client *ssh.Client, command string) (stdout, stderr []byte, exitCode int, err error) {
 	session, err := client.NewSession()
 	if err != nil {
@@ -259,14 +250,12 @@ func buildAuthMethods() ([]ssh.AuthMethod, string, error) {
 	var methods []ssh.AuthMethod
 	var fingerprint string
 
-	// Try SSH agent first
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		conn, err := net.Dial("unix", sock)
 		if err == nil {
 			agentClient := agent.NewClient(conn)
 			methods = append(methods, ssh.PublicKeysCallback(agentClient.Signers))
 
-			// Get fingerprint from agent's first key
 			keys, err := agentClient.List()
 			if err == nil && len(keys) > 0 {
 				fingerprint = ssh.FingerprintSHA256(keys[0])
@@ -309,12 +298,6 @@ func buildAuthMethods() ([]ssh.AuthMethod, string, error) {
 	return methods, fingerprint, nil
 }
 
-// buildHostKeyCallback returns a host-key callback with OpenSSH
-// "accept-new" semantics (true trust-on-first-use): a host already in
-// ~/.ssh/known_hosts must present the recorded key (a mismatch fails the
-// connection), while a host never seen before is accepted once and its key is
-// recorded so every later connection detects substitution.
-//
 // Previously an absent known_hosts file disabled verification entirely and
 // permanently (InsecureIgnoreHostKey), and a present known_hosts file made
 // connections to any new host fail outright.
@@ -327,8 +310,6 @@ func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	sshDir := filepath.Join(home, ".ssh")
 	knownHostsFile := filepath.Join(sshDir, "known_hosts")
 	if _, err := os.Stat(knownHostsFile); os.IsNotExist(err) {
-		// Create an empty file so knownhosts.New works and first-use keys
-		// have somewhere to be recorded.
 		if err := os.MkdirAll(sshDir, 0700); err != nil {
 			return nil, fmt.Errorf("create %s: %w", sshDir, err)
 		}
@@ -351,8 +332,8 @@ func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		}
 		var keyErr *knownhosts.KeyError
 		if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
-			// Unknown host: first use. Record the key so later connections
-			// verify it, and tell the user what was trusted.
+			// Record the key so later connections verify it, and tell the user what
+			// was trusted.
 			if aerr := appendKnownHost(knownHostsFile, hostname, key); aerr != nil {
 				return fmt.Errorf("record host key for %s: %w", hostname, aerr)
 			}
@@ -366,7 +347,8 @@ func buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
-// appendKnownHost appends a known_hosts entry for hostname with the given key.
+// appendKnownHost appends a known_hosts entry for hostname with the given
+// key.
 func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
@@ -378,11 +360,12 @@ func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 	return err
 }
 
-// keepAliveInterval is the interval between keepalive pings. Can be overridden in tests.
+// keepAliveInterval is the interval between keepalive pings. Can be
+// overridden in tests.
 var keepAliveInterval = 30 * time.Second
 
-// keepAlive holds idle NAT and firewall state open. The ping must not want a reply:
-// x/crypto v0.52 spins at 100% CPU on one after a disconnect. see docs/ssh/connection.md
+// keepAlive holds idle NAT and firewall state open. see
+// docs/ssh/connection.md
 func keepAlive(client *ssh.Client, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -405,7 +388,8 @@ func keepAlive(client *ssh.Client, interval time.Duration) {
 	}
 }
 
-// safeBuffer is a simple bytes.Buffer replacement that's safe to use as io.Writer.
+// safeBuffer is a simple bytes.Buffer replacement that's safe to use as
+// io.Writer.
 type safeBuffer struct {
 	data []byte
 }

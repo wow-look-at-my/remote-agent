@@ -2,7 +2,8 @@ package fswire
 
 import "os"
 
-// Portable open flags: raw O_* values differ per platform. see docs/mount/behaviour.md
+// Portable open flags: raw O_* values differ per platform. see
+// docs/mount/behaviour.md
 const (
 	OpenRead   = 1 << 0
 	OpenWrite  = 1 << 1

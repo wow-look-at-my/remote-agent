@@ -1,14 +1,6 @@
 // Package mcpserver exposes a remote host's shell and filesystem to an MCP
-// client as a set of Model Context Protocol tools.
-//
-// A model's own file tools read the machine it runs on. These tools are how it
-// reaches another one: every call names the host it acts on, so one server
-// serves several, and a file operation lands on the same machine the shell
-// commands do.
-//
-// The transport is the MCP stdio transport: newline-delimited JSON-RPC 2.0 on
-// stdin/stdout. The server holds no state of its own -- each tool call becomes
-// one request to the local remote-agent daemon, which owns the SSH connection.
+// client as a set of Model Context Protocol tools. A model's own file tools
+// read the machine it runs on.
 package mcpserver
 
 import (
@@ -20,7 +12,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// The MCP revision this server implements. A revision it can speak is echoed back instead.
+// The MCP revision this server implements. A revision it can speak is echoed
+// back instead.
 const protocolVersion = "2024-11-05"
 
 // supportedVersions are the protocol revisions we echo back verbatim.
@@ -31,7 +24,6 @@ var supportedVersions = set.Of(
 	"2025-06-18",
 )
 
-// Backend runs one action on the host a route names, and starts a daemon when none answers.
 type Backend interface {
 	Call(route protocol.Route, action string, params map[string]any, out any) error
 }
@@ -42,14 +34,14 @@ type Server struct {
 	version string
 	// For calls that omit a target. Empty makes the target argument mandatory.
 	defaultTarget string
-	// For calls that name no control master. Empty leaves the choice to ssh_config.
+	// For calls that name no control master. Empty leaves the choice to
+	// ssh_config.
 	defaultControlPath string
 	tools              []tool
 	out                *json.Encoder
 }
 
-// New returns a server over b. The two defaults apply to calls that name neither a
-// target nor a control master; an empty defaultTarget makes the argument mandatory.
+// New returns a server over b.
 func New(b Backend, version, defaultTarget, defaultControlPath string) *Server {
 	s := &Server{
 		backend:            b,
@@ -61,8 +53,9 @@ func New(b Backend, version, defaultTarget, defaultControlPath string) *Server {
 	return s
 }
 
-// Serve answers JSON-RPC messages strictly in arrival order. Concurrency would reorder
-// a write and the edit that follows it, and Claude Code never pipelines MCP calls anyway.
+// Serve answers JSON-RPC messages strictly in arrival order. Concurrency
+// would reorder a write and the edit that follows it, and Claude Code never
+// pipelines MCP calls anyway.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	s.out = json.NewEncoder(out)
 	dec := json.NewDecoder(in)
@@ -73,7 +66,8 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			if err == io.EOF {
 				return nil
 			}
-			// A malformed message has no id to answer and leaves the stream unparseable.
+			// A malformed message has no id to answer and leaves the stream
+			// unparseable.
 			return fmt.Errorf("decode request: %w", err)
 		}
 		if req.ID == nil {
@@ -84,7 +78,6 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	}
 }
 
-// handle dispatches one request to its method implementation.
 func (s *Server) handle(req *request) *response {
 	switch req.Method {
 	case "initialize":
@@ -122,8 +115,6 @@ func (s *Server) handleInitialize(req *request) *response {
 	})
 }
 
-// instructions tell the client what these tools act on, and where the SSH
-// target comes from -- the one thing a caller cannot guess.
 func (s *Server) instructions() string {
 	base := "Tools for a remote host reached over SSH by remote-agent: run_command runs a shell " +
 		"command there, and the rest read and write its files. " +
@@ -153,7 +144,8 @@ func (s *Server) handleToolCall(req *request) *response {
 
 	content, err := t.handler(params.Arguments)
 	if err != nil {
-		// A tool failure rides the result, so the model sees it. A JSON-RPC error hides it.
+		// A tool failure rides the result, so the model sees it. A JSON-RPC error
+		// hides it.
 		return result(req, callResult{
 			Content: []contentBlock{{Type: "text", Text: "Error: " + err.Error()}},
 			IsError: true,
@@ -171,7 +163,6 @@ func (s *Server) lookup(name string) *tool {
 	return nil
 }
 
-// reply writes one response.
 func (s *Server) reply(resp *response) {
 	if resp == nil {
 		return
@@ -213,8 +204,6 @@ type callResult struct {
 	IsError bool           `json:"isError,omitempty"`
 }
 
-// contentBlock is one piece of a tool result: text, or an inline image for
-// screenshots and other images read off the remote host.
 type contentBlock struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`

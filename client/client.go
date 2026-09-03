@@ -15,15 +15,13 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// OutputJSON controls whether responses are printed as JSON (true) or compact text (false).
+// OutputJSON controls whether responses are printed as JSON (true) or compact
+// text (false).
 var OutputJSON bool
 
-// Forces every request to one socket, bypassing discovery. REMOTE_AGENT_SOCKET does the same.
+// REMOTE_AGENT_SOCKET does the same.
 var SocketOverride string
 
-// sendRequest locates the daemon socket and sends a request to it, starting a
-// daemon first when none is running. The daemon is an implementation detail:
-// `connect` makes the first command faster, it is not a prerequisite.
 func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	sockPath, err := findSocket()
 	if err == nil {
@@ -45,21 +43,19 @@ func sendRequest(req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) 
 	if startErr != nil {
 		return nil, startErr
 	}
-	// Pinned, so a long-lived client stops re-resolving on every later untargeted call.
+	// Pinned, so a long-lived client stops re-resolving on every later
+	// untargeted call.
 	resolvedSocket = sockPath
 	return sendRequestTo(sockPath, req)
 }
 
-// sendRequestFor sends a request to the daemon for an explicit target, starting
-// one when none answers. Socket discovery and the process-wide --target are
-// bypassed entirely: a caller that names its target (every MCP tool call does)
-// must reach that host and no other, whatever else this process has been
-// pointed at.
+// Socket discovery and the process-wide --target are bypassed entirely: a
+// caller that names its target (every MCP tool call does) must reach that
+// host and no other, whatever else this process has been pointed at.
 func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	if route.Target == "" {
 		return sendRequest(req)
 	}
-	// Two ports on one host are two daemons, so resolve the key once and key every lookup on it.
 	key, err := TargetKey(route.Target)
 	if err != nil {
 		return nil, err
@@ -86,7 +82,8 @@ func sendRequestFor(route protocol.Route, req *protocol.DaemonRequest) (*protoco
 	return sendRequestTo(sockPath, req)
 }
 
-// sendRequestTo sends a request to a specific daemon Unix socket and returns the response.
+// sendRequestTo sends a request to a specific daemon Unix socket and returns
+// the response.
 func sendRequestTo(sockPath string, req *protocol.DaemonRequest) (*protocol.DaemonResponse, error) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -108,11 +105,12 @@ func sendRequestTo(sockPath string, req *protocol.DaemonRequest) (*protocol.Daem
 	return &resp, nil
 }
 
-// findSocket determines which daemon socket to use. An explicit SocketOverride,
-// the REMOTE_AGENT_SOCKET environment variable, the --target flag or
-// REMOTE_AGENT_TARGET take precedence; otherwise it discovers a single running
-// daemon by globbing TempDir. A socket path is returned whether or not anything
-// is listening on it -- sendRequest starts a daemon when nothing answers.
+// findSocket determines which daemon socket to use. An explicit
+// SocketOverride, the REMOTE_AGENT_SOCKET environment variable, the --target
+// flag or REMOTE_AGENT_TARGET take precedence; otherwise it discovers a
+// single running daemon by globbing TempDir. A socket path is returned
+// whether or not anything is listening on it -- sendRequest starts a daemon
+// when nothing answers.
 func findSocket() (string, error) {
 	if SocketOverride != "" {
 		return SocketOverride, nil
@@ -151,14 +149,15 @@ func findSocket() (string, error) {
 	}
 }
 
-// Call decodes the daemon's payload into out, which may be nil. It is what the MCP
-// server uses: a structured result rather than text on stdout.
+// Call decodes the daemon's payload into out, which may be nil. It is what
+// the MCP server uses: a structured result rather than text on stdout.
 func Call(action string, params map[string]any, out any) error {
 	return CallRoute(protocol.Route{}, action, params, out)
 }
 
 // CallTarget is Call against a named SSH target, starting a daemon for that
-// target when none is running. An empty target falls back to Call's discovery.
+// target when none is running. An empty target falls back to Call's
+// discovery.
 func CallTarget(target, action string, params map[string]any, out any) error {
 	return CallRoute(protocol.Route{Target: target}, action, params, out)
 }
@@ -176,7 +175,8 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 	if out == nil {
 		return nil
 	}
-	// Round-trip the decoded JSON into the caller's struct, rather than assert every field.
+	// Round-trip the decoded JSON into the caller's struct, rather than assert
+	// every field.
 	data, err := json.Marshal(resp.Data)
 	if err != nil {
 		return fmt.Errorf("encode %s result: %w", action, err)
@@ -187,7 +187,8 @@ func CallRoute(route protocol.Route, action string, params map[string]any, out a
 	return nil
 }
 
-// DaemonBackend satisfies the MCP server's Backend, so neither package imports the other.
+// DaemonBackend satisfies the MCP server's Backend, so neither package
+// imports the other.
 type DaemonBackend struct{}
 
 // Call implements the MCP server's Backend interface.
@@ -195,8 +196,9 @@ func (DaemonBackend) Call(route protocol.Route, action string, params map[string
 	return CallRoute(route, action, params, out)
 }
 
-// Connect starts a target's daemon. A port folds into the target, and a controlPath
-// names a control master the daemon must run its commands through.
+// Connect starts a target's daemon. A port folds into the target, and a
+// controlPath names a control master the daemon must run its commands
+// through.
 func Connect(target string, port int, controlPath string) error {
 	return daemon.Start(daemon.StartOptions{
 		Target:      target,
@@ -215,9 +217,9 @@ func Disconnect() error {
 }
 
 // timeoutFromEnv reads REMOTE_AGENT_TIMEOUT, the seconds an exec waits before
-// giving up. Zero means the daemon's default. A value that is set but not a
-// positive number is a typo, and a typo that quietly restored the default
-// would be read as the timeout having been raised.
+// giving up. A value that is set but not a positive number is a typo, and a
+// typo that quietly restored the default would be read as the timeout having
+// been raised.
 func timeoutFromEnv() (float64, error) {
 	raw := os.Getenv("REMOTE_AGENT_TIMEOUT")
 	if raw == "" {
@@ -230,9 +232,8 @@ func timeoutFromEnv() (float64, error) {
 	return secs, nil
 }
 
-// Exec runs a command on the remote and returns the remote command's exit code.
-// A non-nil error indicates a transport/daemon failure (distinct from the remote
-// command exiting non-zero, which is reported via the returned exit code).
+// Exec runs a command on the remote and returns the remote command's exit
+// code.
 func Exec(command string) (int, error) {
 	params := map[string]any{"command": command}
 	secs, err := timeoutFromEnv()
@@ -253,9 +254,9 @@ func Exec(command string) (int, error) {
 	if resp.Error != "" {
 		return 0, fmt.Errorf("%s", resp.Error)
 	}
-	// The exec handler may rewrite ls commands to use the native ls handler,
-	// so the response could be either an ExecResult or a DirListing.
-	// Detect by checking for "entries" key (ls) vs "stdout" key (exec).
+	// The exec handler may rewrite ls commands to use the native ls handler, so
+	// the response could be either an ExecResult or a DirListing. Detect by
+	// checking for "entries" key (ls) vs "stdout" key (exec).
 	if m, ok := resp.Data.(map[string]any); ok {
 		if _, hasEntries := m["entries"]; hasEntries {
 			return 0, printResponse(resp, "ls")
@@ -311,7 +312,6 @@ func Write(path, mode string, content []byte) error {
 		"path": path,
 		"mode": mode,
 	}
-	// Other bytes must be base64: encoding/json replaces invalid UTF-8 with U+FFFD.
 	if utf8.Valid(content) {
 		params["content"] = string(content)
 	} else {
@@ -328,9 +328,7 @@ func Write(path, mode string, content []byte) error {
 	return printResponse(resp, "write")
 }
 
-// Edit performs a find/replace in a remote file. Unless replaceAll is set the
-// text must occur exactly once, so an ambiguous edit fails instead of silently
-// changing the first match.
+// Edit performs a find/replace in a remote file.
 func Edit(path, oldText, newText string, replaceAll bool) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "edit",
@@ -347,7 +345,6 @@ func Edit(path, oldText, newText string, replaceAll bool) error {
 	return printResponse(resp, "edit")
 }
 
-// Glob lists remote files matching a glob pattern, newest first.
 func Glob(pattern, path string, limit int) error {
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "glob",

@@ -22,8 +22,6 @@ func findCall(t *testing.T, mock *mockRunner, command string) mockCall {
 	return mockCall{}
 }
 
-// A command with no deadline of its own still gets one: an MCP server answers
-// in arrival order, so one command that never ends takes the session with it.
 func TestExecCarriesTheDefaultDeadline(t *testing.T) {
 	h, mock := newTestHandler()
 	mock.onCommand("tail -f /var/log/syslog", nil, 0)
@@ -58,9 +56,7 @@ func TestExecRejectsADeadlineItCannotHonor(t *testing.T) {
 	}
 }
 
-// The helper path is an argument like any other: a remote home directory with a
-// space in it splits into two words unquoted, and the command names a file that
-// is not there. see docs/ape.md
+// see docs/ape.md
 func TestHelperCommandsQuoteTheBinaryPath(t *testing.T) {
 	mock := newMockRunner()
 	d := &Daemon{runner: mock, remotePath: "/home/ann smith/.cache/remote-agent/agent-ab12cd"}

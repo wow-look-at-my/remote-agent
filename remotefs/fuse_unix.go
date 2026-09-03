@@ -16,13 +16,14 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// Short, because forwarded commands change the remote underneath. see docs/mount/behaviour.md
+// Short, because forwarded commands change the remote underneath. see
+// docs/mount/behaviour.md
 const (
 	attrCacheTimeout  = time.Second
 	entryCacheTimeout = time.Second
 )
 
-// The largest write the kernel hands us at once. 8x the default, so a copy costs 8x fewer trips.
+// 8x the default, so a copy costs 8x fewer trips.
 const maxWrite = 1 << 20
 
 // Options configures a mount.
@@ -60,12 +61,11 @@ func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
 		EntryTimeout:    &entryTimeout,
 		NegativeTimeout: &negativeTimeout,
 		MountOptions: fuse.MountOptions{
-			FsName:     name,
-			Name:       "remote-agent",
-			AllowOther: opts.AllowOther,
-			Debug:      opts.Debug,
-			MaxWrite:   maxWrite,
-			// mount(2) first, fusermount after: works as root and as an ordinary user.
+			FsName:      name,
+			Name:        "remote-agent",
+			AllowOther:  opts.AllowOther,
+			Debug:       opts.Debug,
+			MaxWrite:    maxWrite,
 			DirectMount: true,
 			// The protocol has no xattrs, and saying so stops the kernel asking.
 			DisableXAttrs: true,
@@ -82,18 +82,20 @@ func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
 // Dir returns the local mount point.
 func (m *Mount) Dir() string { return m.dir }
 
-// Unmount fails while the mount is busy. A caller that asked deserves to hear that,
-// rather than have its shell yanked out from under it.
+// Unmount fails while the mount is busy. A caller that asked deserves to hear
+// that, rather than have its shell yanked out from under it.
 func (m *Mount) Unmount() error {
 	err := m.server.Unmount()
 	if err != nil {
 		return fmt.Errorf("unmount %s: %w", m.dir, err)
 	}
-	// Closed either way: a helper attached to a departing mount is a leaked process.
+	// Closed either way: a helper attached to a departing mount is a leaked
+	// process.
 	return m.client.Close()
 }
 
-// ForceUnmount detaches a busy mount, which every shutdown path needs. see docs/mount/behaviour.md
+// ForceUnmount detaches a busy mount, which every shutdown path needs. see
+// docs/mount/behaviour.md
 func (m *Mount) ForceUnmount() error {
 	err := m.server.Unmount()
 	if err != nil {
@@ -138,7 +140,7 @@ type shared struct {
 	client *Client
 }
 
-// One file or directory. Its path comes from its position, so a parent rename moves it.
+// Its path comes from its position, so a parent rename moves it.
 type node struct {
 	fs.Inode
 	shared *shared
@@ -175,9 +177,6 @@ type handle struct {
 	id uint64
 }
 
-// call sends one request and converts transport failures into EIO -- a dead
-// SSH connection has to surface as an I/O error to the calling program, not
-// as a hang.
 func (n *node) call(req *fswire.Request, payload []byte) (*fswire.Response, []byte, syscall.Errno) {
 	resp, data, err := n.shared.client.Call(req, payload)
 	if err != nil {
@@ -432,8 +431,6 @@ func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 	return 0
 }
 
-// newChild creates (or reuses) the inode for a child, keyed by the remote's
-// inode number so hard links and repeated lookups map to one local inode.
 func (n *node) newChild(ctx context.Context, attr *fswire.Attr) *fs.Inode {
 	return n.NewInode(ctx, &node{shared: n.shared}, fs.StableAttr{
 		Mode: attr.Mode & syscall.S_IFMT,

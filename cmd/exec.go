@@ -17,7 +17,8 @@ var execCmd = &cobra.Command{
 	Short:              "Run shell command on remote",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Flag parsing is off, so `exec ls -la` survives and the global flags arrive unparsed.
+		// Flag parsing is off, so `exec ls -la` survives and the global flags
+		// arrive unparsed.
 		args, err := applyGlobalFlags(args)
 		if err != nil {
 			return err

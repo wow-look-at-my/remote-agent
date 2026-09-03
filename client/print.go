@@ -12,8 +12,8 @@ import (
 // Response printers: each daemon action renders to compact, greppable text
 // (the --json flag bypasses all of this and prints the raw payload).
 
-// printResponse outputs the daemon response to stdout.
-// When OutputJSON is true, outputs indented JSON. Otherwise outputs compact text.
+// printResponse outputs the daemon response to stdout. When OutputJSON is
+// true, outputs indented JSON. Otherwise outputs compact text.
 func printResponse(resp *protocol.DaemonResponse, action string) error {
 	if resp.Error != "" {
 		return fmt.Errorf("%s", resp.Error)
@@ -28,7 +28,8 @@ func printResponse(resp *protocol.DaemonResponse, action string) error {
 	return printTextResponse(resp.Data, action)
 }
 
-// printTextResponse formats the response data as compact text based on the action type.
+// printTextResponse formats the response data as compact text based on the
+// action type.
 func printTextResponse(data any, action string) error {
 	m, _ := data.(map[string]any)
 	if m == nil {
@@ -77,7 +78,8 @@ func printExecText(m map[string]any) error {
 	stdout, _ := m["stdout"].(string)
 	stderr, _ := m["stderr"].(string)
 
-	// Each stream keeps its own channel, and cmd/exec.go carries the remote exit code.
+	// Each stream keeps its own channel, and cmd/exec.go carries the remote exit
+	// code.
 	if stdout != "" {
 		fmt.Fprint(os.Stdout, stdout)
 	}
@@ -88,8 +90,6 @@ func printExecText(m map[string]any) error {
 }
 
 func printReadText(m map[string]any) error {
-	// Binary files arrive base64-framed (JSON cannot carry invalid UTF-8);
-	// decode back to the exact original bytes.
 	if b64, _ := m["content_b64"].(string); b64 != "" {
 		data, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil {

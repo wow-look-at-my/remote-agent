@@ -37,14 +37,12 @@ func statfs(path string) (*fswire.Statfs, error) {
 		return nil, err
 	}
 	return &fswire.Statfs{
-		Blocks: st.Blocks,
-		Bfree:  st.Bfree,
-		Bavail: st.Bavail,
-		Files:  st.Files,
-		Ffree:  st.Ffree,
-		Bsize:  uint32(st.Bsize),
-		// darwin's statfs has no name-length field; 255 is the POSIX
-		// minimum every filesystem macOS mounts satisfies.
+		Blocks:  st.Blocks,
+		Bfree:   st.Bfree,
+		Bavail:  st.Bavail,
+		Files:   st.Files,
+		Ffree:   st.Ffree,
+		Bsize:   uint32(st.Bsize),
 		NameLen: 255,
 		Frsize:  uint32(st.Bsize),
 	}, nil

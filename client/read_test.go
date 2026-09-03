@@ -38,7 +38,7 @@ func TestPrintReadTextPlain(t *testing.T) {
 }
 
 func TestPrintReadTextBinary(t *testing.T) {
-	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80} // not valid UTF-8
+	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80}
 	out := captureStdout(t, func() {
 		err := printTextResponse(map[string]any{
 			"content_b64": base64.StdEncoding.EncodeToString(binary),

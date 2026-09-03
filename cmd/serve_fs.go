@@ -7,9 +7,7 @@ import (
 	"github.com/wow-look-at-my/remote-agent/agent"
 )
 
-// serveFSCmd is the remote half of a mount. Unlike the other serve
-// subcommands it is long-lived: it stays attached to one SSH channel and
-// answers filesystem requests until the local mount goes away.
+// serveFSCmd is the remote half of a mount.
 var serveFSCmd = &cobra.Command{
 	Use:   "fs",
 	Short: "Serve filesystem operations for a remote mount",

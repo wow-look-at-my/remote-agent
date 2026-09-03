@@ -27,12 +27,9 @@ func TestRunCommandInDirectory(t *testing.T) {
 	backend.results["exec"] = protocol.ExecResult{Stdout: "ok\n"}
 
 	callText(t, backend, "run_command", map[string]any{"command": "make build", "cwd": "/srv/it's mine"})
-	// One quoted word, so a space or a quote in it cannot split or escape the command.
 	assert.Equal(t, `cd '/srv/it'\''s mine' && make build`, backend.lastCall(t).Params["command"])
 }
 
-// A non-zero exit must reach the caller as a failure, carrying the output that
-// explains it -- reporting it as a successful result reads as "it worked".
 func TestRunCommandNonZeroExitIsAnError(t *testing.T) {
 	backend := newFakeBackend()
 	backend.results["exec"] = protocol.ExecResult{Stderr: "no such file\n", ExitCode: 2}
@@ -66,8 +63,8 @@ func TestRunCommandNoOutput(t *testing.T) {
 	assert.Contains(t, callText(t, backend, "run_command", map[string]any{"command": "true"}), "no output")
 }
 
-// The daemon answers a plain `ls <path>` with a directory listing instead of a
-// command result. Decoding only the command shape would render that as an
+// The daemon answers a plain `ls <path>` with a directory listing instead of
+// a command result. Decoding only the command shape would render that as an
 // empty success.
 func TestRunCommandHandlesListingReply(t *testing.T) {
 	backend := newFakeBackend()
@@ -95,8 +92,9 @@ func TestRunCommandRequiresCommand(t *testing.T) {
 	assert.ErrorContains(t, err, "command")
 }
 
-// A call that names a control socket must reach the daemon layer with it: that
-// is the whole path by which "here is a control file" becomes a connection.
+// A call that names a control socket must reach the daemon layer with it:
+// that is the whole path by which "here is a control file" becomes a
+// connection.
 func TestControlPathTravelsWithTheCall(t *testing.T) {
 	backend := newFakeBackend()
 	backend.results["exec"] = protocol.ExecResult{Stdout: "ok\n"}
@@ -158,7 +156,6 @@ func TestControlPathIsDeclaredOnEveryTool(t *testing.T) {
 		require.Contains(t, props, "control_path", "%s must advertise control_path", tool.Name)
 		desc := props["control_path"].(map[string]any)["description"].(string)
 		assert.Contains(t, desc, "ControlPath", "%s should name what it takes", tool.Name)
-		// Optional: most hosts need no master, and ssh_config may name one.
 		required, _ := tool.InputSchema["required"].([]string)
 		assert.NotContains(t, required, "control_path")
 	}

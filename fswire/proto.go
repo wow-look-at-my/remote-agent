@@ -2,11 +2,6 @@
 // FUSE mount and the remote helper, plus its framing. It has no dependencies
 // beyond the standard library so both ends -- including the remote helper
 // built for platforms that cannot mount anything -- can share it.
-//
-// One request/response pair corresponds to one filesystem operation. The
-// local side multiplexes many in flight over a single SSH channel, matching
-// replies by ID, so a mount costs one channel rather than one process per
-// syscall.
 package fswire
 
 // Op names. They mirror the POSIX calls the FUSE layer has to service.
@@ -32,8 +27,8 @@ const (
 	OpPing     = "ping" // liveness check for the helper process
 )
 
-// Request is one filesystem operation. Fields not relevant to Op are unset.
-// Write payloads travel as the frame's binary payload, not in this header.
+// Fields not relevant to Op are unset. Write payloads travel as the frame's
+// binary payload, not in this header.
 type Request struct {
 	ID   uint64 `json:"id"`
 	Op   string `json:"op"`
@@ -49,7 +44,6 @@ type Request struct {
 	Mode   uint32 `json:"mode,omitempty"`
 	Dev    uint32 `json:"dev,omitempty"`
 
-	// Pointers, so "not requested" differs from "set to zero": truncating is not leaving alone.
 	SetMode  *uint32 `json:"set_mode,omitempty"`
 	SetUID   *uint32 `json:"set_uid,omitempty"`
 	SetGID   *uint32 `json:"set_gid,omitempty"`
@@ -58,8 +52,7 @@ type Request struct {
 	SetMtime *Time   `json:"set_mtime,omitempty"`
 }
 
-// Response is the reply to a Request. Errno is a raw errno value (0 on
-// success); read payloads travel as the frame's binary payload.
+// Response is the reply to a Request.
 type Response struct {
 	ID    uint64 `json:"id"`
 	Errno uint32 `json:"errno,omitempty"`
@@ -72,7 +65,6 @@ type Response struct {
 	Statfs  *Statfs    `json:"statfs,omitempty"`
 }
 
-// Time is a wall-clock timestamp split the way stat(2) reports it.
 type Time struct {
 	Sec  int64  `json:"sec"`
 	Nsec uint32 `json:"nsec"`
@@ -94,7 +86,6 @@ type Attr struct {
 	Ctime   Time   `json:"ctime"`
 }
 
-// One readdir result. Attr is filled in, so `ls -l` costs one request and not one per file.
 type DirEntry struct {
 	Name string `json:"name"`
 	Mode uint32 `json:"mode"` // file type bits, as returned by readdir
@@ -102,7 +93,6 @@ type DirEntry struct {
 	Attr *Attr  `json:"attr,omitempty"`
 }
 
-// Statfs is the subset of statfs(2) reported for the mount.
 type Statfs struct {
 	Blocks  uint64 `json:"blocks"`
 	Bfree   uint64 `json:"bfree"`

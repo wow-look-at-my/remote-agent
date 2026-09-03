@@ -15,9 +15,7 @@ type Options struct {
 // Mount is a live mount. Unreachable in this build.
 type Mount struct{}
 
-// MountClient reports that mounting is unavailable. Two builds land here: a
-// platform where FUSE does not exist, and the portable APE, whose toolchain
-// has no libc constants to link go-fuse against. Everything else works, so
+// MountClient reports that mounting is unavailable. Everything else works, so
 // this is a missing feature rather than a broken build. see docs/ape.md
 func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
 	return nil, errors.New("this build cannot mount a remote filesystem: it has no FUSE support " +

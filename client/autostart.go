@@ -15,23 +15,24 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// TargetOverride is the --target flag: it selects the socket, and names the target a fresh daemon starts for.
+// TargetOverride is the --target flag: it selects the socket, and names the
+// target a fresh daemon starts for.
 var TargetOverride string
 
-// ControlPathOverride is the --control-path flag: the master a daemon this process starts must run through.
+// ControlPathOverride is the --control-path flag: the master a daemon this
+// process starts must run through.
 var ControlPathOverride string
 
-// Socket of a daemon this process started. It beats discovery, but never a call that names its own target.
+// Socket of a daemon this process started. It beats discovery, but never a
+// call that names its own target.
 var resolvedSocket string
 
-// The two failures auto-start repairs. A request-level failure never matches, so it never reconnects.
+// A request-level failure never matches, so it never reconnects.
 var errNoDaemon = errors.New("no daemon running")
 
-// Actions that must not bring a daemon up: one disconnects, the other asks whether a daemon is there.
 var autoStartExempt = set.Of("disconnect", "ping")
 
 // autoStartEnabled reports whether this process may start daemons.
-// REMOTE_AGENT_NO_AUTOSTART=1 turns it off.
 func autoStartEnabled(action string) bool {
 	if autoStartExempt.Contains(action) {
 		return false
@@ -41,8 +42,7 @@ func autoStartEnabled(action string) bool {
 
 // resolveTarget determines which target a fresh daemon should be started for:
 // the --target flag, then REMOTE_AGENT_TARGET, then the recorded target of a
-// daemon that ran earlier. Several remembered targets are ambiguous, so the
-// caller is told to pick one rather than being connected somewhere arbitrary.
+// daemon that ran earlier.
 func resolveTarget() (daemon.TargetRecord, error) {
 	explicit := TargetOverride
 	if explicit == "" {
@@ -68,7 +68,8 @@ func resolveTarget() (daemon.TargetRecord, error) {
 	}
 }
 
-// TargetKey folds REMOTE_AGENT_PORT into a target. see docs/daemon/lifecycle.md
+// TargetKey folds REMOTE_AGENT_PORT into a target. see
+// docs/daemon/lifecycle.md
 func TargetKey(target string) (string, error) {
 	return targetKey(target, 0)
 }
@@ -88,7 +89,7 @@ func targetKey(target string, port int) (string, error) {
 }
 
 // DefaultTarget reports the target this process was pointed at: --target,
-// REMOTE_AGENT_TARGET, or the record for a pinned socket. Empty means a call must carry one.
+// REMOTE_AGENT_TARGET, or the record for a pinned socket.
 func DefaultTarget() (string, error) {
 	if TargetOverride != "" {
 		return TargetKey(TargetOverride)
@@ -118,7 +119,7 @@ func recordFor(route protocol.Route) (daemon.TargetRecord, error) {
 	if err != nil {
 		return daemon.TargetRecord{}, err
 	}
-	// An older record keeps its port in a field of its own. Without this, a restart reaches port 22.
+	// An older record keeps its port in a field of its own.
 	if ep.Port == 0 && prevErr == nil && prev.Port > 0 {
 		if key, err = daemon.CanonicalTarget(key, prev.Port); err != nil {
 			return daemon.TargetRecord{}, err
@@ -136,8 +137,9 @@ func recordFor(route protocol.Route) (daemon.TargetRecord, error) {
 	return rec, nil
 }
 
-// ControlPathFor resolves a route's control master: the call's own, else --control-path,
-// else REMOTE_AGENT_CONTROL_PATH. Empty leaves it to ssh_config, where it is optional.
+// ControlPathFor resolves a route's control master: the call's own, else
+// --control-path, else REMOTE_AGENT_CONTROL_PATH. Empty leaves it to
+// ssh_config, where it is optional.
 func ControlPathFor(route protocol.Route) string {
 	if route.ControlPath != "" {
 		return route.ControlPath
@@ -149,9 +151,7 @@ func ControlPathFor(route protocol.Route) string {
 }
 
 // checkControlPath refuses to run a call through a daemon that is not using
-// the control master the caller asked for. The daemon is shared and long-lived,
-// so a second caller naming a different one cannot change it -- and silently
-// running on the wrong connection is exactly what naming it was meant to stop.
+// the control master the caller asked for.
 func checkControlPath(route protocol.Route) error {
 	want := ControlPathFor(route)
 	if want == "" {
@@ -169,7 +169,8 @@ func checkControlPath(route protocol.Route) error {
 		route.Target, via, want, route.Target)
 }
 
-// Only connects: a request runs a remote command, which is far too much for a liveness check.
+// Only connects: a request runs a remote command, which is far too much for a
+// liveness check.
 func socketAnswers(sockPath string) bool {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -179,12 +180,11 @@ func socketAnswers(sockPath string) bool {
 	return true
 }
 
-// Two connects racing for one socket leave one dead on "address already in use".
 var startMu sync.Mutex
 
-// autoStartDaemon starts a daemon for rec in the background and waits for it to
-// accept connections, returning its socket path. It is what makes `connect` an
-// optimization rather than a prerequisite.
+// autoStartDaemon starts a daemon for rec in the background and waits for it
+// to accept connections, returning its socket path. It is what makes
+// `connect` an optimization rather than a prerequisite.
 func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	startMu.Lock()
 	defer startMu.Unlock()
@@ -196,7 +196,6 @@ func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	sockPath := daemon.SocketPath(rec.Target)
 	logPath := strings.TrimSuffix(sockPath, ".sock") + ".log"
 	if pingSocket(sockPath) {
-		// Another caller started it while this one waited for the lock.
 		return sockPath, nil
 	}
 
@@ -211,8 +210,9 @@ func autoStartDaemon(rec daemon.TargetRecord) (string, error) {
 	return sockPath, nil
 }
 
-// portFromEnv reads REMOTE_AGENT_PORT. A ~/.ssh/config alias carries its own port,
-// resolved when the daemon connects, so this is only for a bare host name.
+// portFromEnv reads REMOTE_AGENT_PORT. A ~/.ssh/config alias carries its own
+// port, resolved when the daemon connects, so this is only for a bare host
+// name.
 func portFromEnv() (int, bool) {
 	s := os.Getenv("REMOTE_AGENT_PORT")
 	if s == "" {

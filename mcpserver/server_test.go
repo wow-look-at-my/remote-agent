@@ -60,8 +60,8 @@ func (f *fakeBackend) lastCall(t *testing.T) backendCall {
 	return f.calls[len(f.calls)-1]
 }
 
-// exchange runs a batch of JSON-RPC request lines through a server and returns
-// the decoded responses.
+// exchange runs a batch of JSON-RPC request lines through a server and
+// returns the decoded responses.
 func exchange(t *testing.T, backend Backend, requests ...string) []map[string]any {
 	t.Helper()
 	in := strings.NewReader(strings.Join(requests, "\n") + "\n")

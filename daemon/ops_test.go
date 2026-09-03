@@ -168,7 +168,7 @@ func TestHandleRead(t *testing.T) {
 
 func TestHandleReadBinaryContent(t *testing.T) {
 	h, mock := newTestHandler()
-	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80} // not valid UTF-8
+	binary := []byte{0x7f, 'E', 'L', 'F', 0x00, 0xff, 0x80}
 	mock.onCommand("cat '/bin/blob'", binary, 0)
 
 	resp := h.handleRead(map[string]any{"path": "/bin/blob"})
@@ -231,7 +231,6 @@ func TestHandleWriteError(t *testing.T) {
 
 func TestHandleWriteStreamsViaStdin(t *testing.T) {
 	h, mock := newTestHandler()
-	// 300 KiB, which is past the kernel's 128 KiB per-argument cap.
 	content := strings.Repeat("x", 300*1024)
 
 	resp := h.handleWrite(map[string]any{"path": "/tmp/big.bin", "content": content})
@@ -250,7 +249,7 @@ func TestHandleWriteStreamsViaStdin(t *testing.T) {
 
 func TestHandleWriteContentB64Binary(t *testing.T) {
 	h, mock := newTestHandler()
-	binary := []byte{0x00, 0xff, 0xfe, 'a', 0x80, 0x01} // invalid UTF-8
+	binary := []byte{0x00, 0xff, 0xfe, 'a', 0x80, 0x01}
 	resp := h.handleWrite(map[string]any{
 		"path":        "/tmp/blob",
 		"content_b64": base64.StdEncoding.EncodeToString(binary),

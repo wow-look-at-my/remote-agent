@@ -30,7 +30,6 @@ func readUptime() string {
 	if err != nil {
 		return "unknown"
 	}
-	// Format: { sec = 1710000000, usec = 0 } ...
 	s := string(out)
 	i := strings.Index(s, "sec = ")
 	if i < 0 {

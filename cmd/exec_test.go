@@ -16,7 +16,8 @@ import (
 
 // startLocalExecDaemon stands up a daemon socket whose exec action runs the
 // command locally via `sh -c`. It is a faithful stand-in for the real
-// SSH-backed daemon for the purpose of exercising the client/exec exit-code path.
+// SSH-backed daemon for the purpose of exercising the client/exec exit-code
+// path.
 func startLocalExecDaemon(t *testing.T, sockPath string) func() {
 	t.Helper()
 	l, err := net.Listen("unix", sockPath)
@@ -97,8 +98,6 @@ func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
 	osExit = func(c int) { called, gotCode = true, c }
 	defer func() { osExit = old }()
 
-	// "--" reaches RunE literally and must not join the command: exit 7 comes back
-	// only if the remote ran `exit 7` and not `-- exit 7`.
 	suppressStdout(t)
 	assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
 
@@ -177,7 +176,6 @@ func TestApplyGlobalFlags(t *testing.T) {
 		{"both", []string{"--json", "--target", "root@h", "df"}, []string{"df"}, "root@h", true},
 		// A separator ends the scan, so a command really named --target survives.
 		{"separator", []string{"--", "--target", "x"}, []string{"--target", "x"}, "", false},
-		// Scanning stops at the first non-global: these belong to the command.
 		{"command flags untouched", []string{"grep", "--target", "x"}, []string{"grep", "--target", "x"}, "", false},
 		{"unknown global-looking flag", []string{"--nope", "ls"}, []string{"--nope", "ls"}, "", false},
 	}

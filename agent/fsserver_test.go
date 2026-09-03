@@ -51,8 +51,6 @@ func startFSServer(t *testing.T) *fsTestConn {
 	}
 }
 
-// call sends one request and returns the reply. Requests are issued one at a
-// time here, so replies arrive in order.
 func (c *fsTestConn) call(req *fswire.Request, payload []byte) (*fswire.Response, []byte) {
 	c.t.Helper()
 	c.mu.Lock()
@@ -280,7 +278,6 @@ func TestFSServerHandlesConcurrentRequests(t *testing.T) {
 		<-done
 	}()
 
-	// Every request before any reply: the server answers concurrently and tags each one.
 	w := fswire.NewWriter(clientEnd)
 	for i := 0; i < 20; i++ {
 		req := &fswire.Request{ID: uint64(i + 1), Op: fswire.OpStat, Path: string(rune('a'+i)) + ".txt"}
@@ -318,7 +315,8 @@ func TestFSServerClosesHandlesWhenSessionEnds(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, resp.Handle)
 
-	// A dropped connection ends the session and its handles, and leaks no open files.
+	// A dropped connection ends the session and its handles, and leaks no open
+	// files.
 	clientEnd.Close()
 	<-done
 }

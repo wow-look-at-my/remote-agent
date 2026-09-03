@@ -15,15 +15,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Client half of OpenSSH's ControlMaster multiplexing protocol (PROTOCOL.mux,
-// version 4), in "passenger" mode: the client asks the master to run a
-// command and hands it three file descriptors to use as the command's stdio.
-//
 // This exists so remote-agent can ride a connection the user already
 // authenticated. The master owns the SSH transport -- there is no way to
 // borrow it as a raw connection for x/crypto/ssh -- so speaking its socket
-// protocol is the only way in.
-// see docs/ssh/control-sockets.md
+// protocol is the only way in. see docs/ssh/control-sockets.md
 const (
 	muxVersion = 4
 
@@ -39,14 +34,17 @@ const (
 
 	// muxNoEscape disables the escape character for a session.
 	muxNoEscape = 0xffffffff
-	// A master's reply is a few words. Anything larger is a desynchronized stream.
+	// A master's reply is a few words. Anything larger is a desynchronized
+	// stream.
 	muxMaxPacket = 256 << 10
-	// Bounds the handshake, so a socket whose owner is wedged fails instead of hanging.
+	// Bounds the handshake, so a socket whose owner is wedged fails instead of
+	// hanging.
 	muxDialTimeout = 10 * time.Second
 )
 
-// ControlConn runs commands through an OpenSSH control master. Each command takes its
-// own connection and its own session, so they run concurrently. see docs/ssh/connection.md
+// ControlConn runs commands through an OpenSSH control master. Each command
+// takes its own connection and its own session, so they run concurrently. see
+// docs/ssh/connection.md
 type ControlConn struct {
 	path string
 	sem  chan struct{} // bounds concurrent sessions, as CommandRunner does
@@ -54,8 +52,6 @@ type ControlConn struct {
 	MasterPID uint32
 }
 
-// DialControlMaster probes the master with an alive check, so a stale socket file
-// fails here rather than on the first command.
 func DialControlMaster(path string) (*ControlConn, error) {
 	c := &ControlConn{path: path, sem: make(chan struct{}, maxConcurrentSessions)}
 	pid, err := c.aliveCheck()
@@ -110,7 +106,6 @@ func (c *ControlConn) runStdin(command string, stdin []byte, timeout time.Durati
 	return res.Stdout, res.Stderr, res.ExitCode, res.Err
 }
 
-// runMuxSession pumps one open session to completion.
 func runMuxSession(sess *muxSession, stdin []byte) CommandResult {
 	var outBuf, errBuf safeBuffer
 	var wg sync.WaitGroup
@@ -123,7 +118,6 @@ func runMuxSession(sess *muxSession, stdin []byte) CommandResult {
 			return CommandResult{ExitCode: -1, Started: true, Err: fmt.Errorf("write stdin: %w", err)}
 		}
 	}
-	// EOF on stdin, from a half-close: the command's other two fds stay open.
 	sess.stdin.CloseWrite()
 
 	exitCode, err := sess.wait()
@@ -139,12 +133,12 @@ func (c *ControlConn) StartStream(command string) (io.ReadWriteCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The helper reports failures in-band, and a full stderr socket stalls the session.
+	// The helper reports failures in-band, and a full stderr socket stalls the
+	// session.
 	go io.Copy(io.Discard, sess.stderr)
 	return sess, nil
 }
 
-// One command on the master: its control connection, plus our ends of the stdio socketpairs.
 type muxSession struct {
 	ctl       *net.UnixConn
 	sessionID uint32
@@ -243,8 +237,8 @@ func (c *ControlConn) openSession(command string) (*muxSession, error) {
 	req = putU32(req, muxNoEscape)
 	req = putString(req, "") // terminal type
 	req = putString(req, command)
-	// No environment strings: the daemon's own environment is not the
-	// session's, and the master applies the user's SendEnv/SetEnv itself.
+	// No environment strings: the daemon's own environment is not the session's,
+	// and the master applies the user's SendEnv/SetEnv itself.
 	if err := writeMuxPacket(ctl, req); err != nil {
 		return nil, fmt.Errorf("control master write: %w", err)
 	}
@@ -403,20 +397,17 @@ func socketPair(name string) (ours *net.UnixConn, theirs int, err error) {
 	return conn.(*net.UnixConn), fds[1], nil
 }
 
-// One byte of payload carrying SCM_RIGHTS, the way OpenSSH's mm_send_fd does it.
 func sendFD(ctl *net.UnixConn, fd int) error {
 	_, _, err := ctl.WriteMsgUnix([]byte{0}, unix.UnixRights(fd), nil)
 	return err
 }
 
-// writeMuxPacket frames one message: a uint32 length, then the body.
 func writeMuxPacket(w io.Writer, body []byte) error {
 	buf := binary.BigEndian.AppendUint32(make([]byte, 0, 4+len(body)), uint32(len(body)))
 	_, err := w.Write(append(buf, body...))
 	return err
 }
 
-// readMuxPacket reads one length-prefixed message.
 func readMuxPacket(r io.Reader) ([]byte, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {

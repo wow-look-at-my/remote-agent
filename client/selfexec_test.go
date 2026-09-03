@@ -32,9 +32,9 @@ func TestSelfCommandArgumentsArriveIntact(t *testing.T) {
 	assert.Equal(t, "[two words]\n[]\n[a'b]\n", string(out))
 }
 
-// The point of the shell: it runs a file the kernel refuses to execve, which is
-// how a Cosmopolitan APE starts on a host with no APE binfmt entry. os/exec
-// alone reports "exec format error" on the same file. see docs/ape.md
+// The point of the shell: it runs a file the kernel refuses to execve, which
+// is how a Cosmopolitan APE starts on a host with no APE binfmt entry.
+// os/exec alone reports "exec format error" on the same file. see docs/ape.md
 func TestSelfCommandStartsAFileExecveRejects(t *testing.T) {
 	dir := t.TempDir()
 	// No #! line and no ELF header, so execve answers ENOEXEC -- the same answer

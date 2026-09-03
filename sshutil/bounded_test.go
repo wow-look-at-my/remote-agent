@@ -20,7 +20,8 @@ func TestBoundedReturnsAFinishedCommand(t *testing.T) {
 }
 
 // The deadline has to release the caller, and it has to abort the session --
-// without the abort the command keeps a slot and the next caller waits behind it.
+// without the abort the command keeps a slot and the next caller waits behind
+// it.
 func TestBoundedAbortsAtTheDeadline(t *testing.T) {
 	release := make(chan struct{})
 	aborted := make(chan struct{})
@@ -47,7 +48,6 @@ func TestBoundedAbortsAtTheDeadline(t *testing.T) {
 	close(release)
 }
 
-// A deadline of zero is what the callers that are not open-ended pass.
 func TestBoundedWithoutADeadlineWaits(t *testing.T) {
 	res := bounded(0, func() { t.Error("nothing to abort") }, func() CommandResult {
 		time.Sleep(10 * time.Millisecond)

@@ -93,7 +93,6 @@ func parseStat(info *protocol.ProcessInfo, data string) {
 
 	name := data[start+1 : end]
 	rest := strings.Fields(data[end+2:])
-	// rest[0] = state, rest[1] = ppid, ...
 	if len(rest) < 22 {
 		return
 	}
@@ -104,7 +103,7 @@ func parseStat(info *protocol.ProcessInfo, data string) {
 	info.State = rest[0]
 	info.PPID, _ = strconv.Atoi(rest[1])
 
-	// Field 23 of stat, which is rest[21] because rest starts after comm. In pages.
+	// In pages.
 	rssPages, _ := strconv.ParseInt(rest[21], 10, 64)
 	info.RSS = rssPages * int64(os.Getpagesize())
 }

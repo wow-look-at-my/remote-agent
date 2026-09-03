@@ -9,11 +9,6 @@ import (
 )
 
 // EditFile performs a find/replace on a file.
-//
-// Unless replaceAll is set, oldText must appear exactly once: an ambiguous
-// edit is rejected rather than silently applied to whichever occurrence came
-// first, because the caller (a human at the CLI or a model through the MCP
-// edit tool) cannot tell from a success message which one was changed.
 func EditFile(path, oldText, newText string, replaceAll bool) (*protocol.EditResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
