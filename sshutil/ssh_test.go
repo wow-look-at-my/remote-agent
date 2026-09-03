@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -506,17 +505,16 @@ func TestKeepAliveDisconnect(t *testing.T) {
 // sshGFunc is the shape of the ssh -G seam.
 type sshGFunc func(user, host string, port int) *exec.Cmd
 
-// sshGMu guards that seam, which is one variable for the process.
-var sshGMu sync.Mutex
-
 // stubSSHG installs stub as the seam for the rest of the test and returns the
 // real one, which a stub that inspects the command ssh would run still needs.
+// The seam is one variable for the process, so the test takes the process to
+// itself.
 func stubSSHG(t *testing.T, stub sshGFunc) sshGFunc {
 	t.Helper()
-	sshGMu.Lock()
+	t.Serial()
 	real := sshGFunc(sshGCommand)
 	sshGCommand = stub
-	t.Cleanup(func() { sshGCommand = real; sshGMu.Unlock() })
+	t.Cleanup(func() { sshGCommand = real })
 	return real
 }
 

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"os"
-	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,19 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cliMu guards the state a CLI test drives that the process has one of: the
-// shared rootCmd, os.Stdout, the osExit seam, and the flag globals in package
-// client. The runner picks the order and the concurrency, so a test that
-// touches any of them holds this lock for its whole body.
-var cliMu sync.Mutex
-
-// lockCLI takes that lock until the test ends. Call t.Setenv BEFORE it, never
-// after: t.Setenv makes the test serial, which waits for every parallel test to
-// finish, and a parallel test waiting for this lock never does.
+// lockCLI gives the test the process to itself. A CLI test drives state the
+// process has one of: the shared rootCmd, os.Stdout, the osExit seam, and the
+// flag globals in package client. Tests are parallel by default here, and
+// t.Serial is what the runner offers for exactly this; a lock of our own would
+// deadlock against it, because t.Setenv declares a test serial too and then
+// waits for every parallel test -- including one blocked on that lock.
 func lockCLI(t *testing.T) {
 	t.Helper()
-	cliMu.Lock()
-	t.Cleanup(cliMu.Unlock)
+	t.Serial()
 }
 
 // resetFlags puts every flag in a command tree back at its default. A cobra
