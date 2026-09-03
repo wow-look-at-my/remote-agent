@@ -166,11 +166,8 @@ func TestParseInt64(t *testing.T) {
 }
 
 func TestHandleDisconnect(t *testing.T) {
-	// Override exit function to prevent os.Exit during test
+	// The daemon carries its own exit, so the test never reaches os.Exit.
 	done := make(chan struct{})
-	oldExit := exitFunc
-	exitFunc = func(code int) { close(done) }
-	defer func() { exitFunc = oldExit }()
 
 	mock := newMockRunner()
 	d := &Daemon{
@@ -178,13 +175,13 @@ func TestHandleDisconnect(t *testing.T) {
 		remotePath: "/tmp/.remote-agent-test",
 		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
 		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+		exit:       func(int) { close(done) },
 	}
 	h := &Handler{daemon: d}
 
 	resp := h.handleDisconnect()
 	assert.True(t, resp.OK)
 
-	// Wait for the goroutine to complete before restoring exitFunc
 	<-done
 }
 

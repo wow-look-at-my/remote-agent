@@ -19,10 +19,11 @@ import (
 	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
 
-// Idle-timeout tuning. Overridable in tests.
-var (
-	idleTimeout       = 30 * time.Minute
-	idleCheckInterval = 60 * time.Second
+// Idle-timeout defaults. A daemon carries its own, so the watchdog reads only
+// state its own daemon owns.
+const (
+	defaultIdleTimeout       = 30 * time.Minute
+	defaultIdleCheckInterval = 60 * time.Second
 )
 
 // Daemon holds a persistent SSH connection and serves requests over a Unix socket.
@@ -40,6 +41,32 @@ type Daemon struct {
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
 	mounts       mountRegistry  // filesystem mounts this daemon owns
 	streamFunc   streamStarter  // test seam for opening a mount's transport
+	// Idle tuning and process exit. Zero means the default; a test gives its
+	// own daemon the values it needs instead of writing a package global.
+	idleTimeout       time.Duration
+	idleCheckInterval time.Duration
+	exit              func(int)
+}
+
+// idleTuning is the watchdog's timeout and tick, defaulted.
+func (d *Daemon) idleTuning() (timeout, interval time.Duration) {
+	timeout, interval = d.idleTimeout, d.idleCheckInterval
+	if timeout == 0 {
+		timeout = defaultIdleTimeout
+	}
+	if interval == 0 {
+		interval = defaultIdleCheckInterval
+	}
+	return timeout, interval
+}
+
+// exitProcess ends the process, or calls what a test installed in its place.
+func (d *Daemon) exitProcess(code int) {
+	if d.exit != nil {
+		d.exit(code)
+		return
+	}
+	os.Exit(code)
 }
 
 // opStart records that a request began. The watchdog never fires mid-operation.
@@ -277,7 +304,8 @@ func (d *Daemon) handleClient(conn net.Conn) {
 // watchIdle shuts the daemon down once it has been idle for idleTimeout with
 // no operations in flight. It fires at most once.
 func (d *Daemon) watchIdle() {
-	ticker := time.NewTicker(idleCheckInterval)
+	timeout, interval := d.idleTuning()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
 		d.mu.Lock()
@@ -285,10 +313,10 @@ func (d *Daemon) watchIdle() {
 		busy := d.activeOps > 0
 		d.mu.Unlock()
 		// A live mount holds the daemon open: dropping it breaks every open file under it.
-		if !busy && !d.hasMounts() && idle > idleTimeout {
+		if !busy && !d.hasMounts() && idle > timeout {
 			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
 			d.shutdown()
-			exitFunc(0)
+			d.exitProcess(0)
 			return
 		}
 	}

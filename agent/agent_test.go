@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,9 +13,17 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
+// stdoutMu serializes the capture below. os.Stdout is one value for the
+// process, so two tests capturing at once write into each other's file and one
+// of them reads back nothing.
+var stdoutMu sync.Mutex
+
 // captureStdout redirects stdout to a temp file and returns the captured output.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	stdoutMu.Lock()
+	defer stdoutMu.Unlock()
+
 	old := os.Stdout
 	f, err := os.CreateTemp(t.TempDir(), "stdout")
 	require.Nil(t, err)

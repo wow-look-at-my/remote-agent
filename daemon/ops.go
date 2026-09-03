@@ -445,13 +445,10 @@ func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 	return okResponse(result)
 }
 
-// exitFunc can be overridden in tests to prevent os.Exit during testing.
-var exitFunc = os.Exit
-
 func (h *Handler) handleDisconnect() *protocol.DaemonResponse {
 	go func() {
 		h.daemon.shutdown()
-		exitFunc(0)
+		h.daemon.exitProcess(0)
 	}()
 	return okResponse(map[string]string{"status": "disconnecting"})
 }

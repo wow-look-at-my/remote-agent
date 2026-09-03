@@ -61,6 +61,7 @@ func startLocalExecDaemon(t *testing.T, sockPath string) func() {
 }
 
 func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
+	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
@@ -75,15 +76,15 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 
 	// Invoke the command's RunE directly to avoid mutating the shared rootCmd
 	// argument state that other tests in this package rely on.
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"exit 7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"exit 7"}))
 
 	assert.True(t, called, "osExit should be invoked for a non-zero remote exit")
 	assert.Equal(t, 7, gotCode)
 }
 
 func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
+	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
@@ -98,9 +99,8 @@ func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
 
 	// "--" reaches RunE literally and must not join the command: exit 7 comes back
 	// only if the remote ran `exit 7` and not `-- exit 7`.
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
 
 	assert.True(t, called)
 	assert.Equal(t, 7, gotCode)
@@ -112,6 +112,7 @@ func TestExecuteExecOnlyDashDashIsUsageError(t *testing.T) {
 }
 
 func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
+	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
@@ -123,9 +124,8 @@ func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
 	osExit = func(c int) { called = true }
 	defer func() { osExit = old }()
 
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"true"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"true"}))
 
 	assert.False(t, called, "osExit must not be called when the remote command succeeds")
 }
@@ -135,6 +135,7 @@ func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
 // daemon discovery finds -- the wrong host) and end up inside the remote
 // command string.
 func TestExecAppliesGlobalTargetFlag(t *testing.T) {
+	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
@@ -148,14 +149,14 @@ func TestExecAppliesGlobalTargetFlag(t *testing.T) {
 	defer func(prev string) { client.TargetOverride = prev }(client.TargetOverride)
 	client.TargetOverride = ""
 
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"--target", "root@elsewhere", "exit 7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"--target", "root@elsewhere", "exit 7"}))
 	assert.Equal(t, 7, gotCode, "the remote shell must have run `exit 7`, not `--target root@elsewhere exit 7`")
 	assert.Equal(t, "root@elsewhere", client.TargetOverride, "the global --target must be applied, not swallowed")
 }
 
 func TestApplyGlobalFlags(t *testing.T) {
+	lockCLI(t)
 	defer func(target string, jsonOut bool) {
 		client.TargetOverride, client.OutputJSON = target, jsonOut
 	}(client.TargetOverride, client.OutputJSON)
@@ -193,6 +194,7 @@ func TestApplyGlobalFlags(t *testing.T) {
 }
 
 func TestApplyGlobalFlagsErrors(t *testing.T) {
+	lockCLI(t)
 	_, err := applyGlobalFlags([]string{"--target"})
 	assert.ErrorContains(t, err, "needs a value")
 
@@ -201,6 +203,7 @@ func TestApplyGlobalFlagsErrors(t *testing.T) {
 }
 
 func TestApplyGlobalFlagsControlPath(t *testing.T) {
+	lockCLI(t)
 	defer func(prev string) { client.ControlPathOverride = prev }(client.ControlPathOverride)
 
 	for _, args := range [][]string{

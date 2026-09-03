@@ -473,22 +473,16 @@ func TestOpStartEndTracksActivity(t *testing.T) {
 }
 
 func TestWatchIdleWaitsForActiveOps(t *testing.T) {
-	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
-	defer func() {
-		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
-	}()
-
-	idleTimeout = 1 * time.Millisecond
-	idleCheckInterval = 5 * time.Millisecond
-
 	done := make(chan struct{})
 	var once sync.Once
-	exitFunc = func(code int) { once.Do(func() { close(done) }) }
 
 	d := &Daemon{
-		sockPath:     filepath.Join(t.TempDir(), "busy.sock"),
-		pidPath:      filepath.Join(t.TempDir(), "busy.pid"),
-		lastActivity: time.Now().Add(-1 * time.Hour), // long past the idle timeout
+		sockPath:          filepath.Join(t.TempDir(), "busy.sock"),
+		pidPath:           filepath.Join(t.TempDir(), "busy.pid"),
+		lastActivity:      time.Now().Add(-1 * time.Hour), // long past the idle timeout
+		idleTimeout:       1 * time.Millisecond,
+		idleCheckInterval: 5 * time.Millisecond,
+		exit:              func(int) { once.Do(func() { close(done) }) },
 	}
 	// Simulate a long-running command (e.g. a 40-minute build) in flight.
 	d.opStart()
@@ -512,22 +506,16 @@ func TestWatchIdleWaitsForActiveOps(t *testing.T) {
 }
 
 func TestWatchIdleShutdown(t *testing.T) {
-	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
-	defer func() {
-		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
-	}()
-
-	idleTimeout = 1 * time.Millisecond
-	idleCheckInterval = 10 * time.Millisecond
-
 	done := make(chan struct{})
 	var once sync.Once
-	exitFunc = func(code int) { once.Do(func() { close(done) }) }
 
 	d := &Daemon{
-		sockPath:     filepath.Join(t.TempDir(), "idle.sock"),
-		pidPath:      filepath.Join(t.TempDir(), "idle.pid"),
-		lastActivity: time.Now().Add(-1 * time.Hour),
+		sockPath:          filepath.Join(t.TempDir(), "idle.sock"),
+		pidPath:           filepath.Join(t.TempDir(), "idle.pid"),
+		lastActivity:      time.Now().Add(-1 * time.Hour),
+		idleTimeout:       1 * time.Millisecond,
+		idleCheckInterval: 10 * time.Millisecond,
+		exit:              func(int) { once.Do(func() { close(done) }) },
 	}
 
 	go d.watchIdle()
