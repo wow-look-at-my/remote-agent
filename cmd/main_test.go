@@ -16,7 +16,9 @@ import (
 // touches any of them holds this lock for its whole body.
 var cliMu sync.Mutex
 
-// lockCLI takes that lock until the test ends.
+// lockCLI takes that lock until the test ends. Call t.Setenv BEFORE it, never
+// after: t.Setenv makes the test serial, which waits for every parallel test to
+// finish, and a parallel test waiting for this lock never does.
 func lockCLI(t *testing.T) {
 	t.Helper()
 	cliMu.Lock()

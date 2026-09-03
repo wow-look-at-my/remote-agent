@@ -61,12 +61,12 @@ func startLocalExecDaemon(t *testing.T, sockPath string) func() {
 }
 
 func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
-	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var gotCode int
 	var called bool
@@ -84,12 +84,12 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 }
 
 func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
-	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var gotCode int
 	var called bool
@@ -112,12 +112,12 @@ func TestExecuteExecOnlyDashDashIsUsageError(t *testing.T) {
 }
 
 func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
-	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var called bool
 	old := osExit
@@ -135,12 +135,12 @@ func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
 // daemon discovery finds -- the wrong host) and end up inside the remote
 // command string.
 func TestExecAppliesGlobalTargetFlag(t *testing.T) {
-	lockCLI(t)
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "exec.sock")
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	old := osExit
 	var gotCode int
