@@ -49,6 +49,23 @@ What the path does need is quoting, like every other argument: a remote home
 directory with a space in it splits into two words otherwise. `Daemon.helper()`
 is the one place that renders it.
 
+## What the APE gives up: the mount
+
+The local half of a filesystem mount is go-fuse, and go-fuse reaches for
+Linux-only `syscall` constants (`MS_NODEV`, `MS_NOSUID`, `MNT_DETACH`,
+`O_DIRECT`) that Cosmopolitan's portable `syscall` package does not define --
+it cannot, because one binary serves several kernels. So `remotefs`'s FUSE half
+carries `!cosmo` and the APE gets the stub, which says so and points at
+`--no-mount`.
+
+An APE session therefore reaches the remote through remote-agent's own MCP
+tools rather than through the kernel, which is the difference `--no-mount`
+already describes: Claude's built-in file tools, and any other program, act on
+local disk. Build natively (`make build`, or `go build`) for a mount.
+
+The remote half is not affected. `serve fs` is ordinary file I/O with no FUSE
+in it, so an APE helper on the remote serves a mount for a native client.
+
 ## Checking a host by hand
 
 ```sh

@@ -228,7 +228,10 @@ connect.
   registers one when it runs as root. So daemon auto-start and the MCP server
   command in the launcher's config both name `/bin/sh`, with the binary as its
   argument. The remote needs nothing: sshd hands the helper's command line to
-  the login shell already. see docs/ape.md
+  the login shell already. The same build carries no mount -- go-fuse needs
+  Linux-only syscall constants a portable libc cannot define, so `remotefs`'s
+  FUSE half is `!cosmo` and an APE session runs as `--no-mount` does. The
+  remote half is unaffected: `serve fs` is plain file I/O. see docs/ape.md
 - **A remote command carries a deadline, because one that never ends wedges an
   MCP session** -- the server answers in arrival order, so every later call
   queues behind it, and a client cannot cancel. `exec` is the only action whose
