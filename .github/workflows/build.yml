@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    # Every branch, no tag: the build publishes, and a tag push would re-enter it.
+    branches: ['**']
 
 permissions:
   id-token: write
