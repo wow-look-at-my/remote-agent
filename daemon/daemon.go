@@ -19,13 +19,15 @@ import (
 	"github.com/wow-look-at-my/remote-agent/sshutil"
 )
 
-// Idle-timeout tuning. Overridable in tests.
-var (
-	idleTimeout       = 30 * time.Minute
-	idleCheckInterval = 60 * time.Second
+// Idle-timeout defaults. A daemon carries its own, so the watchdog reads only
+// state its own daemon owns.
+const (
+	defaultIdleTimeout       = 30 * time.Minute
+	defaultIdleCheckInterval = 60 * time.Second
 )
 
-// Daemon holds a persistent SSH connection and serves requests over a Unix socket.
+// Daemon holds a persistent SSH connection and serves requests over a Unix
+// socket.
 type Daemon struct {
 	conn         *sshutil.ConnResult
 	runner       Runner // abstraction over SSH command execution
@@ -40,9 +42,35 @@ type Daemon struct {
 	auditWG      sync.WaitGroup // tracks in-flight async audit writes so shutdown can drain them
 	mounts       mountRegistry  // filesystem mounts this daemon owns
 	streamFunc   streamStarter  // test seam for opening a mount's transport
+	// Idle tuning and process exit.
+	idleTimeout       time.Duration
+	idleCheckInterval time.Duration
+	exit              func(int)
 }
 
-// opStart records that a request began. The watchdog never fires mid-operation.
+// idleTuning is the watchdog's timeout and tick, defaulted.
+func (d *Daemon) idleTuning() (timeout, interval time.Duration) {
+	timeout, interval = d.idleTimeout, d.idleCheckInterval
+	if timeout == 0 {
+		timeout = defaultIdleTimeout
+	}
+	if interval == 0 {
+		interval = defaultIdleCheckInterval
+	}
+	return timeout, interval
+}
+
+// exitProcess ends the process, or calls what a test installed in its place.
+func (d *Daemon) exitProcess(code int) {
+	if d.exit != nil {
+		d.exit(code)
+		return
+	}
+	os.Exit(code)
+}
+
+// opStart records that a request began. The watchdog never fires
+// mid-operation.
 func (d *Daemon) opStart() {
 	d.mu.Lock()
 	d.activeOps++
@@ -50,7 +78,8 @@ func (d *Daemon) opStart() {
 	d.mu.Unlock()
 }
 
-// opEnd records that a request finished; the idle countdown starts here, not at its start.
+// opEnd records that a request finished; the idle countdown starts here, not
+// at its start.
 func (d *Daemon) opEnd() {
 	d.mu.Lock()
 	d.activeOps--
@@ -58,11 +87,17 @@ func (d *Daemon) opEnd() {
 	d.mu.Unlock()
 }
 
-// auditAsync audits on its own SSH channel, so the operation does not wait for it.
-// Failures are ignored; shutdown drains what is in flight. see docs/daemon/lifecycle.md
+// helper is the command word for the deployed helper.
+func (d *Daemon) helper() string {
+	return shellEscape(d.remotePath)
+}
+
+// auditAsync audits on its own SSH channel, so the operation does not wait
+// for it. Failures are ignored; shutdown drains what is in flight. see
+// docs/daemon/lifecycle.md
 func (d *Daemon) auditAsync(action, detail string) {
 	cmd := fmt.Sprintf("%s serve audit --action %s --detail %s",
-		d.remotePath, shellEscape(action), shellEscape(detail))
+		d.helper(), shellEscape(action), shellEscape(detail))
 	d.auditWG.Add(1)
 	go func() {
 		defer d.auditWG.Done()
@@ -70,7 +105,6 @@ func (d *Daemon) auditAsync(action, detail string) {
 	}()
 }
 
-// SocketPath is the socket for a target, canonicalized first so each port keys its own daemon.
 func SocketPath(target string) string {
 	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.sock", h[:6]))
@@ -85,13 +119,14 @@ func PIDPath(target string) string {
 // StartOptions configures a daemon.
 type StartOptions struct {
 	Target string // [user@]host[:port], or a ~/.ssh/config Host alias
-	// Port joins the identity like a port in the target; disagreeing ports error. 0 = ssh_config, else 22.
+	// Port joins the identity; a port that disagrees is an error.
 	Port int
-	// ControlPath makes that master mandatory. Empty uses ssh_config's, when one answers.
+	// ControlPath makes that master mandatory.
 	ControlPath string
 }
 
-// Start connects to the remote, deploys the helper binary, and starts the daemon.
+// Start connects to the remote, deploys the helper binary, and starts the
+// daemon.
 func Start(opts StartOptions) error {
 	// The port keys the daemon, whether it came in the target or beside it.
 	target, err := CanonicalTarget(opts.Target, opts.Port)
@@ -111,7 +146,7 @@ func Start(opts StartOptions) error {
 		return nil
 	}
 
-	// ssh -G fills in only what the caller left out. see docs/daemon/lifecycle.md
+	// ssh -G fills in only what the caller left out.
 	controlPath, requireControl := opts.ControlPath, opts.ControlPath != ""
 	if cfg := sshutil.ResolveSSHConfig(ep.User, host, port); cfg != nil {
 		if cfg.HostName != "" {
@@ -165,9 +200,10 @@ func Start(opts StartOptions) error {
 		fmt.Fprintf(os.Stderr, "Deployed helper to %s\n", remotePath)
 	}
 
-	// Through a master there is no key of ours, so the entry names the master instead.
+	// Through a master there is no key of ours, so the entry names the master
+	// instead.
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s --detail %s",
-		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
+		shellEscape(remotePath), shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
 	runner.Run(auditCmd)
 
 	d := &Daemon{
@@ -194,7 +230,7 @@ func Start(opts StartOptions) error {
 	// Write PID file
 	os.WriteFile(d.pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
 
-	// Kept on shutdown, and Port holds no ssh_config port. see docs/daemon/lifecycle.md
+	// Kept on shutdown, and Port holds no ssh_config port.
 	WriteTargetRecord(TargetRecord{Target: target, Port: ep.Port, ControlPath: conn.ControlPath})
 
 	fmt.Fprintf(os.Stderr, "Daemon listening on %s\n", d.sockPath)
@@ -224,10 +260,11 @@ func Start(opts StartOptions) error {
 	}
 }
 
-// pingSocket reports whether a live daemon is already listening at sockPath. It
-// dials the Unix socket (2s timeout), sends a ping request using the same JSON
-// framing as the client, and returns true if any valid DaemonResponse decodes.
-// A read deadline ensures a present-but-dead socket cannot hang the caller.
+// pingSocket reports whether a live daemon is already listening at sockPath.
+// It dials the Unix socket (2s timeout), sends a ping request using the same
+// JSON framing as the client, and returns true if any valid DaemonResponse
+// decodes. A read deadline ensures a present-but-dead socket cannot hang the
+// caller.
 func pingSocket(sockPath string) bool {
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
@@ -257,7 +294,7 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		return
 	}
 
-	// Held so the watchdog neither fires mid-operation nor counts the command as idle.
+	// Held so the watchdog neither fires mid-operation nor counts the command as
 	d.opStart()
 	defer d.opEnd()
 
@@ -266,40 +303,39 @@ func (d *Daemon) handleClient(conn net.Conn) {
 	encoder.Encode(resp)
 }
 
-// watchIdle shuts the daemon down once it has been idle for idleTimeout with
-// no operations in flight. It fires at most once.
 func (d *Daemon) watchIdle() {
-	ticker := time.NewTicker(idleCheckInterval)
+	timeout, interval := d.idleTuning()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
 		d.mu.Lock()
 		idle := time.Since(d.lastActivity)
 		busy := d.activeOps > 0
 		d.mu.Unlock()
-		// A live mount holds the daemon open: dropping it breaks every open file under it.
-		if !busy && !d.hasMounts() && idle > idleTimeout {
+		// A live mount holds the daemon open: dropping it breaks every open file
+		// under it.
+		if !busy && !d.hasMounts() && idle > timeout {
 			fmt.Fprintf(os.Stderr, "\nIdle for %s; shutting down...\n", idle.Round(time.Second))
 			d.shutdown()
-			exitFunc(0)
+			d.exitProcess(0)
 			return
 		}
 	}
 }
 
 func (d *Daemon) shutdown() {
-	// Mounts go first: a mount whose connection died hangs every caller.
 	d.unmountAll()
 
 	// Drain audits so none are lost and the shutdown entry stays last.
 	d.auditWG.Wait()
 
 	if d.runner != nil {
-		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
+		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.helper())
 		d.runner.Run(auditCmd)
 
 		// A cached helper stays for the next connect to reuse.
 		if !d.keepBinary {
-			d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
+			d.runner.Run(fmt.Sprintf("rm -f %s", d.helper()))
 		}
 	}
 
@@ -307,7 +343,7 @@ func (d *Daemon) shutdown() {
 }
 
 func (d *Daemon) cleanup() {
-	// Files first: closing the listener exits the process. see docs/daemon/lifecycle.md
+	// see docs/daemon/lifecycle.md
 	os.Remove(d.sockPath)
 	os.Remove(d.pidPath)
 	if d.listener != nil {
@@ -327,7 +363,8 @@ func connectionDetail(conn *sshutil.ConnResult) string {
 	return "connected directly over ssh"
 }
 
-// deployBinary ships the helper to the remote. reused means a cached copy was already there.
+// deployBinary ships the helper to the remote. reused means a cached copy was
+// already there.
 func deployBinary(runner Runner) (remotePath string, reused bool, err error) {
 	localBinary, err := findDeployBinary()
 	if err != nil {
@@ -342,7 +379,8 @@ func deployBinary(runner Runner) (remotePath string, reused bool, err error) {
 	return deployBinaryData(runner, data)
 }
 
-// deployBinaryData uploads the helper, content-addressed. see docs/daemon/lifecycle.md
+// deployBinaryData uploads the helper, content-addressed. see
+// docs/daemon/lifecycle.md
 func deployBinaryData(runner Runner, data []byte) (remotePath string, reused bool, err error) {
 	sum := sha256.Sum256(data)
 
@@ -380,7 +418,8 @@ func deployBinaryData(runner Runner, data []byte) (remotePath string, reused boo
 	return remotePath, false, nil
 }
 
-// A helper in the persistent cache, not on a throwaway path, survives disconnect.
+// A helper in the persistent cache, not on a throwaway path, survives
+// disconnect.
 func cachedDeploy(remotePath string) bool {
 	return strings.Contains(remotePath, "/.cache/remote-agent/")
 }

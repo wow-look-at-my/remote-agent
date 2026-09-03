@@ -7,19 +7,16 @@ import (
 	"strings"
 )
 
-// defaultSSHPort applies when neither the target nor ssh_config names one.
 const defaultSSHPort = 22
 
 // Endpoint is a parsed SSH target: the login, the host and the port.
 type Endpoint struct {
 	User string // empty when the target names no user
 	Host string // host name, IP address, or ~/.ssh/config Host alias
-	Port int    // 0 when the target names no port
+	Port int
 }
 
-// ParseTarget splits a target of the form [user@]host[:port]. An IPv6 address
-// with a port needs brackets ([::1]:2222). An address with more than one colon
-// and no brackets is a host with no port.
+// ParseTarget splits a target of the form [user@]host[:port].
 func ParseTarget(target string) (Endpoint, error) {
 	rest := strings.TrimSpace(target)
 	if rest == "" {
@@ -54,8 +51,7 @@ func ParseTarget(target string) (Endpoint, error) {
 	if ep.Host == "" {
 		return Endpoint{}, fmt.Errorf("invalid SSH target %q: no host", target)
 	}
-	// A colon with nothing after it is a typed port that got lost. Reading it
-	// as "no port" would send the connection to port 22 without a word.
+	// A colon with nothing after it is a typed port that got lost.
 	if strings.HasSuffix(rest, ":") {
 		return Endpoint{}, fmt.Errorf("invalid SSH target %q: no port after the colon", target)
 	}
@@ -84,8 +80,8 @@ func (e Endpoint) String() string {
 	return host
 }
 
-// Login returns the user a connection to this endpoint logs in as: the user in
-// the target, else $USER, else root.
+// Login returns the user a connection to this endpoint logs in as: the user
+// in the target, else $USER, else root.
 func (e Endpoint) Login() string {
 	if e.User != "" {
 		return e.User
@@ -96,9 +92,6 @@ func (e Endpoint) Login() string {
 	return "root"
 }
 
-// CanonicalTarget returns the string a daemon keys on: one host on two ports is two
-// machines. A port given separately merges in; two that disagree are an error, because
-// the alternative is a silent choice between two hosts.
 func CanonicalTarget(target string, port int) (string, error) {
 	ep, err := ParseTarget(target)
 	if err != nil {
@@ -113,7 +106,8 @@ func CanonicalTarget(target string, port int) (string, error) {
 	return ep.String(), nil
 }
 
-// For the path helpers, which cannot report an error. A bad target keys on its own text.
+// For the path helpers, which cannot report an error. A bad target keys on
+// its own text.
 func normalizeTarget(target string) string {
 	ep, err := ParseTarget(target)
 	if err != nil {

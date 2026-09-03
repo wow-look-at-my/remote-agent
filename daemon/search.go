@@ -8,10 +8,6 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// glob and grep are served by the remote helper binary: matching, ordering
-// and limiting happen on the remote side, so a search costs one round trip
-// and does not depend on which find/grep dialect the remote ships.
-
 func (h *Handler) handleGlob(params map[string]any) *protocol.DaemonResponse {
 	pattern, _ := params["pattern"].(string)
 	path, _ := params["path"].(string)
@@ -23,9 +19,8 @@ func (h *Handler) handleGlob(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// The helper walks the tree: one round trip, and no dependency on the remote's find.
 	cmd := fmt.Sprintf("%s serve glob --pattern %s --path %s",
-		h.daemon.remotePath, shellEscape(pattern), shellEscape(path))
+		h.daemon.helper(), shellEscape(pattern), shellEscape(path))
 	if limit > 0 {
 		cmd += fmt.Sprintf(" --limit %d", limit)
 	}
@@ -53,7 +48,7 @@ func (h *Handler) handleGrep(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	cmd := fmt.Sprintf("%s serve grep --pattern %s --path %s",
-		h.daemon.remotePath, shellEscape(pattern), shellEscape(path))
+		h.daemon.helper(), shellEscape(pattern), shellEscape(path))
 	if include != "" {
 		cmd += " --include " + shellEscape(include)
 	}
@@ -78,9 +73,7 @@ func (h *Handler) handleGrep(params map[string]any) *protocol.DaemonResponse {
 }
 
 // runRemoteJSON runs a remote helper command and decodes its JSON output into
-// out. It returns a non-nil response only on failure -- either the transport
-// failing, the helper exiting non-zero, or the helper reporting an error in
-// its JSON body (how the helper surfaces operational errors).
+// out.
 func (h *Handler) runRemoteJSON(action, cmd string, out any) *protocol.DaemonResponse {
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {

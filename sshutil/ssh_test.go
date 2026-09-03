@@ -96,8 +96,8 @@ func writeTestKey(t *testing.T, path string) ssh.Signer {
 	return signer
 }
 
-// startTestSSHServer creates a minimal SSH server for testing.
-// It accepts connections and runs commands via a simple shell emulator.
+// startTestSSHServer creates a minimal SSH server for testing. It accepts
+// connections and runs commands via a simple shell emulator.
 func startTestSSHServer(t *testing.T) (addr string, cleanup func()) {
 	t.Helper()
 
@@ -319,7 +319,6 @@ func TestHostKeyTOFURecordsAndThenVerifies(t *testing.T) {
 	keyB := generateTestKey(t).PublicKey()
 	addr := fakeAddr("192.0.2.10:2222")
 
-	// First contact, no known_hosts: accept-new records the key.
 	callback, err := buildHostKeyCallback()
 	require.Nil(t, err)
 	require.Nil(t, callback("192.0.2.10:2222", addr, keyA))
@@ -333,7 +332,6 @@ func TestHostKeyTOFURecordsAndThenVerifies(t *testing.T) {
 	require.Nil(t, err)
 	assert.Nil(t, callback("192.0.2.10:2222", addr, keyA))
 
-	// A second key for the recorded host is the case recording it exists for.
 	assert.NotNil(t, callback("192.0.2.10:2222", addr, keyB))
 }
 
@@ -348,7 +346,6 @@ func TestHostKeyUnknownHostAddedAlongsideExistingEntries(t *testing.T) {
 	line := fmt.Sprintf("known.example.com %s", string(ssh.MarshalAuthorizedKey(existing)))
 	require.Nil(t, os.WriteFile(filepath.Join(sshDir, "known_hosts"), []byte(line), 0600))
 
-	// An unknown host is trusted on first use, even when known_hosts already exists.
 	callback, err := buildHostKeyCallback()
 	require.Nil(t, err)
 	newKey := generateTestKey(t).PublicKey()
@@ -408,7 +405,6 @@ func TestConnectDefaultPort(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	// Port 0 should default to 22 and fail (no server on 22)
 	_, err := Connect(ConnectOptions{Host: "127.0.0.1", User: "user"})
 	assert.NotNil(t, err)
 
@@ -467,10 +463,8 @@ func TestKeepAlive(t *testing.T) {
 	keepAliveInterval = 10 * time.Millisecond
 	defer func() { keepAliveInterval = oldInterval }()
 
-	// Start keepalive - it should run at least once
 	go keepAlive(client, keepAliveInterval)
 
-	// Wait a bit for at least one keepalive
 	time.Sleep(50 * time.Millisecond)
 
 	// Close the client - this will cause keepAlive to exit
@@ -502,12 +496,24 @@ func TestKeepAliveDisconnect(t *testing.T) {
 	<-done
 }
 
+// sshGFunc is the shape of the ssh -G seam.
+type sshGFunc func(user, host string, port int) *exec.Cmd
+
+// The seam is a package variable the whole process shares, so the test takes
+// the process to itself.
+func stubSSHG(t *testing.T, stub sshGFunc) sshGFunc {
+	t.Helper()
+	t.Serial()
+	real := sshGFunc(sshGCommand)
+	sshGCommand = stub
+	t.Cleanup(func() { sshGCommand = real })
+	return real
+}
+
 func TestResolveSSHConfig(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
+	stubSSHG(t, func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname 1.2.3.4\nuser bob\nport 2222")
-	}
+	})
 
 	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
@@ -516,18 +522,14 @@ func TestResolveSSHConfig(t *testing.T) {
 	assert.Equal(t, 2222, cfg.Port)
 }
 
-// ssh expands the %r and %p tokens of a ControlPath from what it is told, so a
-// host on port 2201 resolved without -p reports the socket of the same host on
-// port 22 -- a master for the wrong endpoint.
 func TestResolveSSHConfigPassesLoginAndPort(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
 	var args []string
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
-		cmd := old(user, host, port)
+	var real sshGFunc
+	real = stubSSHG(t, func(user, host string, port int) *exec.Cmd {
+		cmd := real(user, host, port)
 		args = cmd.Args
 		return exec.Command("echo", "hostname 127.0.0.1")
-	}
+	})
 
 	require.NotNil(t, ResolveSSHConfig("root", "127.0.0.1", 2201))
 	assert.Contains(t, args, "-p")
@@ -542,13 +544,9 @@ func TestResolveSSHConfigPassesLoginAndPort(t *testing.T) {
 }
 
 func TestResolveSSHConfigMultipleLines(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
-	// Realistic `ssh -G` output: the three wanted keys interleaved with many
-	// extra fields that must be ignored.
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
+	stubSSHG(t, func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "identityfile ~/.ssh/id_rsa\nhostname example.com\nforwardagent no\nuser deploy\naddkeystoagent no\nport 2200\nciphers aes128-ctr")
-	}
+	})
 
 	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
@@ -558,21 +556,17 @@ func TestResolveSSHConfigMultipleLines(t *testing.T) {
 }
 
 func TestResolveSSHConfigCommandFails(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
+	stubSSHG(t, func(user, host string, port int) *exec.Cmd {
 		return exec.Command("false")
-	}
+	})
 
 	assert.Nil(t, ResolveSSHConfig("", "myalias", 0))
 }
 
 func TestResolveSSHConfigPartialOutput(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
+	stubSSHG(t, func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname only.example.com")
-	}
+	})
 
 	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)
@@ -582,11 +576,9 @@ func TestResolveSSHConfigPartialOutput(t *testing.T) {
 }
 
 func TestResolveSSHConfigInvalidPort(t *testing.T) {
-	old := sshGCommand
-	defer func() { sshGCommand = old }()
-	sshGCommand = func(user, host string, port int) *exec.Cmd {
+	stubSSHG(t, func(user, host string, port int) *exec.Cmd {
 		return exec.Command("echo", "hostname h.example.com\nport notanumber\nuser carol")
-	}
+	})
 
 	cfg := ResolveSSHConfig("", "myalias", 0)
 	require.NotNil(t, cfg)

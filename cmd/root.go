@@ -37,15 +37,11 @@ func Execute() error {
 
 // applyGlobalFlags consumes the global flags from the front of the arguments
 // of a command that parses its own flags, applies them, and returns what is
-// left.
-//
-// Cobra hands such a command every token it did not recognize as the command
-// name -- the global flags typed before it included -- and never parses them,
-// so `remote-agent --target host exec ls` would otherwise run on whichever
-// daemon socket discovery happened to find and paste "--target host" into the
-// remote command string. Scanning stops at the first argument that is not a
-// global flag, so a command of its own flags is untouched; "--" stops it
-// explicitly.
+// left. Cobra hands such a command every token it did not recognize as the
+// command name -- the global flags typed before it included -- and never
+// parses them, so `remote-agent --target host exec ls` would otherwise run on
+// whichever daemon socket discovery happened to find and paste "--target
+// host" into the remote command string.
 func applyGlobalFlags(args []string) ([]string, error) {
 	for len(args) > 0 {
 		switch arg := args[0]; {

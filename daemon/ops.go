@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
@@ -15,6 +16,25 @@ import (
 type Runner interface {
 	Run(command string) (stdout, stderr []byte, exitCode int, err error)
 	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+	// RunTimeout gives up on a command after d and tears its session down.
+	RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error)
+}
+
+// execTimeout reads the per-call bound, in seconds, and falls back to the
+// default. see docs/daemon/timeouts.md
+func execTimeout(params map[string]any) (time.Duration, error) {
+	secs, ok := params["timeout"].(float64)
+	if !ok || secs == 0 {
+		return protocol.ExecDefaultTimeout, nil
+	}
+	if secs < 0 {
+		return 0, fmt.Errorf("timeout must be a positive number of seconds, got %v", secs)
+	}
+	d := time.Duration(secs * float64(time.Second))
+	if d > protocol.ExecMaxTimeout {
+		return 0, fmt.Errorf("timeout %s is above the %s maximum", d, protocol.ExecMaxTimeout)
+	}
+	return d, nil
 }
 
 func (h *Handler) handlePing() *protocol.DaemonResponse {
@@ -36,13 +56,17 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 		return h.handleLs(map[string]any{"path": lsPath, "recursive": recursive})
 	}
 
-	// Strip pointless trailing 2>&1 — stderr is already captured separately
+	timeout, err := execTimeout(params)
+	if err != nil {
+		return errResponse(err)
+	}
+
 	command = stripTrailingRedirect(command)
 
 	// Audit log the command (concurrently, on its own SSH channel).
 	h.daemon.auditAsync("exec", command)
 
-	stdout, stderr, exitCode, err := h.daemon.runner.Run(command)
+	stdout, stderr, exitCode, err := h.daemon.runner.RunTimeout(command, timeout)
 	if err != nil {
 		return errResponse(fmt.Errorf("exec failed: %w", err))
 	}
@@ -53,9 +77,10 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 	})
 }
 
-// parseLsCommand recognizes the "ls [path]" the structured handler answers faithfully.
-// Everything else falls through to exec, because the handler quotes the path literally
-// and "ls *.go" would then match nothing and print an empty listing.
+// parseLsCommand recognizes the "ls [path]" the structured handler answers
+// faithfully. Everything else falls through to exec, because the handler
+// quotes the path literally and "ls *.go" would then match nothing and print
+// an empty listing.
 func parseLsCommand(command string) (path string, recursive bool, ok bool) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 || parts[0] != "ls" {
@@ -85,8 +110,6 @@ func plainLsPath(p string) bool {
 	return !strings.ContainsAny(p, "*?[]{}~$`\"'\\!()<>|&;#")
 }
 
-// The transport captures stderr already, so a trailing "2>&1" goes. Another '>' in the
-// command leaves it alone: in "cmd > log 2>&1" the redirect fills the log file.
 func stripTrailingRedirect(command string) string {
 	trimmed := strings.TrimSpace(command)
 	if !strings.HasSuffix(trimmed, "2>&1") {
@@ -105,7 +128,7 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("missing 'path' parameter"))
 	}
 
-	// The channel is binary-safe, so raw bytes beat base64 and need no remote binary.
+	// The channel is binary-safe, so raw bytes beat base64 and need no remote
 	cmd := fmt.Sprintf("cat %s", shellEscape(path))
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
@@ -116,7 +139,6 @@ func (h *Handler) handleRead(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	info := protocol.FileInfo{Size: int64(len(stdout))}
-	// JSON cannot carry invalid UTF-8, so binary content is base64 on the socket hop.
 	if utf8.Valid(stdout) {
 		info.Content = string(stdout)
 	} else {
@@ -145,7 +167,6 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	// Audit (concurrently, on its own SSH channel)
 	h.daemon.auditAsync("write", fmt.Sprintf("path=%s size=%d", path, len(data)))
 
-	// Content rides stdin, which the kernel's 128 KiB per-argument cap does not reach.
 	cmd := fmt.Sprintf("cat > %s && chmod %s %s", shellEscape(path), mode, shellEscape(path))
 	_, stderr, exitCode, err := h.daemon.runner.RunStdin(cmd, data)
 	if err != nil {
@@ -158,9 +179,7 @@ func (h *Handler) handleWrite(params map[string]any) *protocol.DaemonResponse {
 	return okResponse(protocol.WriteResult{BytesWritten: int64(len(data))})
 }
 
-// contentParam extracts a write payload from request params. content_b64
-// (base64, binary-safe across the JSON socket hop) is preferred; the plain
-// content string is the fallback used for valid-UTF-8 payloads.
+// contentParam extracts a write payload from request params.
 func contentParam(params map[string]any) ([]byte, error) {
 	if b64, ok := params["content_b64"].(string); ok && b64 != "" {
 		data, err := base64.StdEncoding.DecodeString(b64)
@@ -173,8 +192,6 @@ func contentParam(params map[string]any) ([]byte, error) {
 	return []byte(content), nil
 }
 
-// validChmodMode reports whether mode is a plain octal chmod mode (like 644
-// or 0755), the only form handleWrite splices into the remote shell command.
 func validChmodMode(mode string) bool {
 	if len(mode) < 3 || len(mode) > 4 {
 		return false
@@ -252,7 +269,7 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
-		h.daemon.remotePath, shellEscape(path), shellEscape(oldText), shellEscape(newText))
+		h.daemon.helper(), shellEscape(path), shellEscape(oldText), shellEscape(newText))
 	if replaceAll {
 		cmd += " --replace-all"
 	}
@@ -264,7 +281,6 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 		return errResponse(fmt.Errorf("edit %s: %s", path, strings.TrimSpace(string(stderr))))
 	}
 
-	// First check if it's an error response
 	var raw map[string]any
 	if err := json.Unmarshal(stdout, &raw); err != nil {
 		return errResponse(fmt.Errorf("parse edit result: %w", err))
@@ -287,7 +303,7 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 		path = "."
 	}
 
-	// find, because BusyBox has it where GNU `stat --format` is missing. %y is the type.
+	// find, because BusyBox has it where GNU `stat --format` is missing.
 	var cmd string
 	if recursive {
 		cmd = fmt.Sprintf("find %s -printf '%%y\\t%%s\\t%%m\\t%%T@\\t%%l\\t%%p\\n'", shellEscape(path))
@@ -301,8 +317,8 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	entries := parseFindOutput(string(stdout))
-	// A partial listing still returns what it found. A failure with nothing at all is
-	// an error, never an empty directory.
+	// A partial listing still returns what it found. A failure with nothing at
+	// all is an error, never an empty directory.
 	if exitCode != 0 && len(entries) == 0 {
 		msg := strings.TrimSpace(string(stderr))
 		if msg == "" {
@@ -313,7 +329,8 @@ func (h *Handler) handleLs(params map[string]any) *protocol.DaemonResponse {
 	return okResponse(protocol.DirListing{Path: path, Entries: entries})
 }
 
-// parseFindOutput parses output from find with format: type\tsize\tmode\ttime\tlinktarget\tpath
+// parseFindOutput parses output from find with format:
+// type\tsize\tmode\ttime\tlinktarget\tpath
 func parseFindOutput(output string) []protocol.DirEntry {
 	var entries []protocol.DirEntry
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -381,7 +398,7 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 	filter, _ := params["filter"].(string)
 
 	// Use remote helper for structured output
-	cmd := h.daemon.remotePath + " serve ps"
+	cmd := h.daemon.helper() + " serve ps"
 	if filter != "" {
 		cmd += " --filter " + shellEscape(filter)
 	}
@@ -402,7 +419,7 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 
 func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 	// Use remote helper
-	cmd := h.daemon.remotePath + " serve sysinfo"
+	cmd := h.daemon.helper() + " serve sysinfo"
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("sysinfo failed: %w", err))
@@ -418,13 +435,10 @@ func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 	return okResponse(result)
 }
 
-// exitFunc can be overridden in tests to prevent os.Exit during testing.
-var exitFunc = os.Exit
-
 func (h *Handler) handleDisconnect() *protocol.DaemonResponse {
 	go func() {
 		h.daemon.shutdown()
-		exitFunc(0)
+		h.daemon.exitProcess(0)
 	}()
 	return okResponse(map[string]string{"status": "disconnecting"})
 }

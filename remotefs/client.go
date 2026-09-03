@@ -1,12 +1,4 @@
 // Package remotefs mounts a remote host's filesystem locally over the
-// daemon's SSH connection, so that *every* program on the local machine --
-// not just tools that know about remote-agent -- reads and writes remote
-// files through ordinary paths.
-//
-// That universality is the point. A tool-by-tool bridge only ever covers the
-// tools it was written for; a mount covers editors, compilers, language
-// servers, and any agent tool that has not been written yet, because they all
-// go through the kernel's filesystem interface.
 package remotefs
 
 import (
@@ -19,14 +11,10 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// The handshake is the one bounded call: an unanswering helper would hang the mount forever.
 var PingTimeout = 10 * time.Second
 
-// ErrClosed is returned once the session to the remote helper has ended.
 var ErrClosed = errors.New("remote filesystem session is closed")
 
-// Client multiplexes many FUSE threads onto one stream. Replies arrive in any order,
-// so a request ID matches each one back to its caller.
 type Client struct {
 	writer *fswire.Writer
 	closer io.Closer
@@ -38,7 +26,6 @@ type Client struct {
 	err     error // why the session ended, reported to later callers
 }
 
-// reply is one completed response handed back to the waiting caller.
 type reply struct {
 	resp    *fswire.Response
 	payload []byte
@@ -57,8 +44,6 @@ func New(w io.Writer, r io.Reader, closer io.Closer) *Client {
 	return c
 }
 
-// Call sends one request and waits for its reply, returning the response
-// header and any binary payload (file data for reads).
 func (c *Client) Call(req *fswire.Request, payload []byte) (*fswire.Response, []byte, error) {
 	ch := make(chan reply, 1)
 
@@ -173,7 +158,7 @@ func (c *Client) Ping() error {
 		}
 		return nil
 	case <-time.After(PingTimeout):
-		// The client close every failed handshake performs releases the waiting goroutine.
+		// The client close every failed handshake performs releases the waiting
 		return fmt.Errorf("no response from the remote filesystem helper after %s", PingTimeout)
 	}
 }

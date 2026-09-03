@@ -1,17 +1,26 @@
 package protocol
 
+import "time"
+
+// see docs/daemon/timeouts.md
+const (
+	// ExecDefaultTimeout applies when a call names no timeout of its own.
+	ExecDefaultTimeout = 10 * time.Minute
+	// ExecMaxTimeout is the longest a call may ask for.
+	ExecMaxTimeout = 6 * time.Hour
+)
+
 // DaemonRequest is sent from CLI to the local daemon over the Unix socket.
 type DaemonRequest struct {
 	Action string         `json:"action"`
 	Params map[string]any `json:"params,omitempty"`
 }
 
-// Route says which host an action runs on. It travels with the call, because one MCP
-// server serves several hosts and is handed each one mid-session.
+// Route says which host an action runs on.
 type Route struct {
 	// Target is the SSH target: user@host, or a ~/.ssh/config Host alias.
 	Target string `json:"target"`
-	// A control master to run through. Naming one makes it mandatory.
+	// A control master to run through.
 	ControlPath string `json:"control_path,omitempty"`
 }
 
@@ -29,8 +38,7 @@ type ExecResult struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-// What read answers with. Exactly one of Content and ContentB64 is set, because JSON
-// cannot carry invalid UTF-8.
+// What read answers with.
 type FileInfo struct {
 	Content    string `json:"content,omitempty"`
 	ContentB64 string `json:"content_b64,omitempty"`
@@ -46,12 +54,10 @@ type WriteResult struct {
 type EditResult struct {
 	Modified bool   `json:"modified"`
 	Message  string `json:"message,omitempty"`
-	// Occurrences replaced. Always 1 unless the edit was a replace-all.
+	// Occurrences replaced.
 	Replacements int `json:"replacements,omitempty"`
 }
 
-// GlobResult is returned by the glob action: remote paths matching a glob
-// pattern, most recently modified first.
 type GlobResult struct {
 	Pattern string   `json:"pattern"`
 	Path    string   `json:"path"`
@@ -67,7 +73,7 @@ const (
 	GrepModeCount   = "count"              // per-file match counts
 )
 
-// One line from a content-mode grep. IsContext separates context from a real match.
+// IsContext separates context from a real match.
 type GrepMatch struct {
 	Path      string `json:"path"`
 	Line      int    `json:"line"`
@@ -103,7 +109,6 @@ type MountResult struct {
 	Mounted    bool   `json:"mounted"`
 }
 
-// MountInfo describes one live mount.
 type MountInfo struct {
 	LocalPath  string `json:"local_path"`
 	RemotePath string `json:"remote_path"`

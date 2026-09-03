@@ -11,7 +11,6 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// call runs one tool through a server wired to backend.
 func call(t *testing.T, backend Backend, name string, args map[string]any) ([]contentBlock, error) {
 	t.Helper()
 	s := New(backend, "test", testTarget, "")
@@ -163,8 +162,8 @@ func TestEditFileAllowsEmptyReplacement(t *testing.T) {
 	backend := newFakeBackend()
 	backend.results["edit"] = protocol.EditResult{Modified: true, Replacements: 1}
 
-	// Deleting text means new_string is "" -- present but empty, which must
-	// not be mistaken for a missing argument.
+	// Deleting text means new_string is "" -- present but empty, which must not
+	// be mistaken for a missing argument.
 	out := callText(t, backend, "edit_file", map[string]any{
 		"path": "/srv/f.go", "old_string": "drop me", "new_string": "",
 	})
@@ -364,7 +363,6 @@ func TestToolCallTargetArgumentWins(t *testing.T) {
 	assert.Equal(t, "root@other", backend.lastCall(t).Route.Target)
 }
 
-// Every tool routes by target, not just the one that gets exercised most.
 func TestEveryToolPassesItsTarget(t *testing.T) {
 	args := map[string]map[string]any{
 		"read_file":     {"path": "/f"},

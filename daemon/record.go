@@ -9,26 +9,23 @@ import (
 	"strings"
 )
 
-// TargetRecord remembers which SSH target a daemon socket belongs to. Socket
-// paths are a one-way hash of the target, so without this a client that finds
-// a dead or missing socket has no way back to the target it should reconnect.
+// TargetRecord remembers which SSH target a daemon socket belongs to.
 type TargetRecord struct {
-	// Target is canonical, port included: socket, PID file and this record are named from it.
+	// Target is canonical, port included: socket, PID file and this record are
 	Target string `json:"target"`
-	// Port duplicates the port in Target; it recovers one from a record written before that.
-	Port int `json:"port"`
-	// ControlPath is the master the daemon rode, empty when it dialed the host itself.
+	Port   int    `json:"port"`
+	// ControlPath is the master the daemon rode, empty when it dialed the host
 	ControlPath string `json:"control_path,omitempty"`
 }
 
-// TargetPath keys on the canonical target like SocketPath, so record and socket sit together.
+// TargetPath keys on the canonical target like SocketPath, so record and
+// socket sit together.
 func TargetPath(target string) string {
 	h := sha256.Sum256([]byte(normalizeTarget(target)))
 	return filepath.Join(os.TempDir(), fmt.Sprintf("remote-agent-%x.target", h[:6]))
 }
 
-// WriteTargetRecord records a daemon's target. It outlives the daemon so the next
-// command can restart one that idled out.
+// WriteTargetRecord records a daemon's target.
 func WriteTargetRecord(rec TargetRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
@@ -37,7 +34,6 @@ func WriteTargetRecord(rec TargetRecord) error {
 	return os.WriteFile(TargetPath(rec.Target), data, 0600)
 }
 
-// ReadTargetRecord loads one record file.
 func ReadTargetRecord(path string) (TargetRecord, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -53,8 +49,8 @@ func ReadTargetRecord(path string) (TargetRecord, error) {
 	return rec, nil
 }
 
-// TargetForSocket names the host behind a socket, so a discovered daemon can still be
-// routed to by target.
+// TargetForSocket names the host behind a socket, so a discovered daemon can
+// still be routed to by target.
 func TargetForSocket(sockPath string) (TargetRecord, error) {
 	return ReadTargetRecord(strings.TrimSuffix(sockPath, ".sock") + ".target")
 }

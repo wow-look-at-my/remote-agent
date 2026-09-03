@@ -99,7 +99,6 @@ func TestFrameRejectsBadJSON(t *testing.T) {
 }
 
 func TestWriterIsConcurrencySafe(t *testing.T) {
-	// The remote answers concurrently onto one stream, so frames must not interleave.
 	var buf syncBuffer
 	w := NewWriter(&buf)
 

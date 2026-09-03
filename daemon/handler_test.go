@@ -168,9 +168,6 @@ func TestHandleDispatchSysinfo(t *testing.T) {
 
 func TestHandleDispatchDisconnect(t *testing.T) {
 	done := make(chan struct{})
-	oldExit := exitFunc
-	exitFunc = func(code int) { close(done) }
-	defer func() { exitFunc = oldExit }()
 
 	mock := newMockRunner()
 	d := &Daemon{
@@ -178,6 +175,7 @@ func TestHandleDispatchDisconnect(t *testing.T) {
 		remotePath: "/tmp/.remote-agent-test",
 		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
 		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+		exit:       func(int) { close(done) },
 	}
 	h := &Handler{daemon: d}
 

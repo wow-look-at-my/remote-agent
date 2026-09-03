@@ -13,7 +13,8 @@ import (
 )
 
 // startCapturingDaemon is like startMockDaemon but also delivers each decoded
-// request on the returned channel, so tests can assert on the exact wire params.
+// request on the returned channel, so tests can assert on the exact wire
+// params.
 func startCapturingDaemon(t *testing.T) (<-chan protocol.DaemonRequest, func()) {
 	t.Helper()
 	dir := t.TempDir()
@@ -49,10 +50,11 @@ func startCapturingDaemon(t *testing.T) (<-chan protocol.DaemonRequest, func()) 
 }
 
 func TestWriteBinaryUsesB64Framing(t *testing.T) {
+	t.Serial()
 	reqs, cleanup := startCapturingDaemon(t)
 	defer cleanup()
 
-	binary := []byte{0x00, 0x80, 0xff, 0x01} // not valid UTF-8
+	binary := []byte{0x00, 0x80, 0xff, 0x01}
 	withSuppressedStdout(t, func() {
 		require.Nil(t, Write("/tmp/blob", "0644", binary))
 	})
@@ -69,6 +71,7 @@ func TestWriteBinaryUsesB64Framing(t *testing.T) {
 }
 
 func TestWriteTextUsesPlainContent(t *testing.T) {
+	t.Serial()
 	reqs, cleanup := startCapturingDaemon(t)
 	defer cleanup()
 

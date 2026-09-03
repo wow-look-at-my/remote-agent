@@ -16,7 +16,8 @@ import (
 
 // startLocalExecDaemon stands up a daemon socket whose exec action runs the
 // command locally via `sh -c`. It is a faithful stand-in for the real
-// SSH-backed daemon for the purpose of exercising the client/exec exit-code path.
+// SSH-backed daemon for the purpose of exercising the client/exec exit-code
+// path.
 func startLocalExecDaemon(t *testing.T, sockPath string) func() {
 	t.Helper()
 	l, err := net.Listen("unix", sockPath)
@@ -66,6 +67,7 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var gotCode int
 	var called bool
@@ -74,10 +76,8 @@ func TestExecuteExecPropagatesNonzeroExit(t *testing.T) {
 	defer func() { osExit = old }()
 
 	// Invoke the command's RunE directly to avoid mutating the shared rootCmd
-	// argument state that other tests in this package rely on.
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"exit 7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"exit 7"}))
 
 	assert.True(t, called, "osExit should be invoked for a non-zero remote exit")
 	assert.Equal(t, 7, gotCode)
@@ -89,6 +89,7 @@ func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var gotCode int
 	var called bool
@@ -96,11 +97,8 @@ func TestExecuteExecStripsLeadingDashDash(t *testing.T) {
 	osExit = func(c int) { called, gotCode = true, c }
 	defer func() { osExit = old }()
 
-	// "--" reaches RunE literally and must not join the command: exit 7 comes back
-	// only if the remote ran `exit 7` and not `-- exit 7`.
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"--", "exit", "7"}))
 
 	assert.True(t, called)
 	assert.Equal(t, 7, gotCode)
@@ -117,15 +115,15 @@ func TestExecuteExecZeroExitDoesNotExit(t *testing.T) {
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	var called bool
 	old := osExit
 	osExit = func(c int) { called = true }
 	defer func() { osExit = old }()
 
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"true"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"true"}))
 
 	assert.False(t, called, "osExit must not be called when the remote command succeeds")
 }
@@ -140,6 +138,7 @@ func TestExecAppliesGlobalTargetFlag(t *testing.T) {
 	cleanup := startLocalExecDaemon(t, sock)
 	defer cleanup()
 	t.Setenv("REMOTE_AGENT_SOCKET", sock)
+	lockCLI(t)
 
 	old := osExit
 	var gotCode int
@@ -148,14 +147,14 @@ func TestExecAppliesGlobalTargetFlag(t *testing.T) {
 	defer func(prev string) { client.TargetOverride = prev }(client.TargetOverride)
 	client.TargetOverride = ""
 
-	suppressStdout(t, func() {
-		assert.Nil(t, execCmd.RunE(execCmd, []string{"--target", "root@elsewhere", "exit 7"}))
-	})
+	suppressStdout(t)
+	assert.Nil(t, execCmd.RunE(execCmd, []string{"--target", "root@elsewhere", "exit 7"}))
 	assert.Equal(t, 7, gotCode, "the remote shell must have run `exit 7`, not `--target root@elsewhere exit 7`")
 	assert.Equal(t, "root@elsewhere", client.TargetOverride, "the global --target must be applied, not swallowed")
 }
 
 func TestApplyGlobalFlags(t *testing.T) {
+	lockCLI(t)
 	defer func(target string, jsonOut bool) {
 		client.TargetOverride, client.OutputJSON = target, jsonOut
 	}(client.TargetOverride, client.OutputJSON)
@@ -176,7 +175,6 @@ func TestApplyGlobalFlags(t *testing.T) {
 		{"both", []string{"--json", "--target", "root@h", "df"}, []string{"df"}, "root@h", true},
 		// A separator ends the scan, so a command really named --target survives.
 		{"separator", []string{"--", "--target", "x"}, []string{"--target", "x"}, "", false},
-		// Scanning stops at the first non-global: these belong to the command.
 		{"command flags untouched", []string{"grep", "--target", "x"}, []string{"grep", "--target", "x"}, "", false},
 		{"unknown global-looking flag", []string{"--nope", "ls"}, []string{"--nope", "ls"}, "", false},
 	}
@@ -193,6 +191,7 @@ func TestApplyGlobalFlags(t *testing.T) {
 }
 
 func TestApplyGlobalFlagsErrors(t *testing.T) {
+	lockCLI(t)
 	_, err := applyGlobalFlags([]string{"--target"})
 	assert.ErrorContains(t, err, "needs a value")
 
@@ -201,6 +200,7 @@ func TestApplyGlobalFlagsErrors(t *testing.T) {
 }
 
 func TestApplyGlobalFlagsControlPath(t *testing.T) {
+	lockCLI(t)
 	defer func(prev string) { client.ControlPathOverride = prev }(client.ControlPathOverride)
 
 	for _, args := range [][]string{

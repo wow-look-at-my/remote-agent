@@ -12,8 +12,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/remotefs"
 )
 
-// mountRegistry tracks this daemon's mounts by local path. Each is a stream on
-// its SSH connection, so both die together.
+// mountRegistry tracks this daemon's mounts by local path. Each is a stream
+// on its SSH connection, so both die together.
 type mountRegistry struct {
 	mu     sync.Mutex
 	mounts map[string]*mountEntry
@@ -24,7 +24,7 @@ type mountEntry struct {
 	remotePath string
 }
 
-// streamStarter opens a long-lived remote stream. The seam for testing mounts without SSH.
+// streamStarter opens a long-lived remote stream.
 type streamStarter func(command string) (mountStream, error)
 
 // mountStream is the bidirectional transport to the remote helper.
@@ -72,14 +72,13 @@ func (d *Daemon) mount(localPath, remotePath string, allowOther bool) error {
 		return err
 	}
 
-	command := fmt.Sprintf("%s serve fs --root %s", d.remotePath, shellEscape(remotePath))
+	command := fmt.Sprintf("%s serve fs --root %s", d.helper(), shellEscape(remotePath))
 	stream, err := d.startStream(command)
 	if err != nil {
 		return fmt.Errorf("start remote filesystem helper: %w", err)
 	}
 
 	client := remotefs.New(stream, stream, stream)
-	// A mount backed by a dead helper hangs every caller, so prove it answers first.
 	if err := client.Ping(); err != nil {
 		client.Close()
 		return fmt.Errorf("remote filesystem helper did not respond: %w", err)
@@ -158,7 +157,8 @@ func (d *Daemon) handleMountsAction() *protocol.DaemonResponse {
 	return okResponse(protocol.MountList{Mounts: list})
 }
 
-// hasMounts reports whether any mount is live, which is what holds the watchdog off.
+// hasMounts reports whether any mount is live, which is what holds the
+// watchdog off.
 func (d *Daemon) hasMounts() bool {
 	d.mounts.mu.Lock()
 	defer d.mounts.mu.Unlock()
@@ -177,7 +177,6 @@ func (d *Daemon) unmountAll() {
 	d.mounts.mu.Unlock()
 
 	for path, entry := range entries {
-		// Force: the connection is closing, and a mount left on a dead one hangs even stat.
 		if err := entry.mount.ForceUnmount(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not unmount %s: %v\n", path, err)
 		}
@@ -189,11 +188,10 @@ func (d *Daemon) unmountAll() {
 // container sharing the host's filesystem) and the mount point is the remote
 // path. The helper would then serve the mount point through the mount, and
 // every access recurses into a hang -- a failure that is both easy to trigger
-// while testing and unpleasant to recover from.
-//
-// The check drops a marker in the local mount point and asks the remote
-// whether it can see it. A remote that cannot be asked (no runner) is assumed
-// to be a genuinely different machine.
+// while testing and unpleasant to recover from. The check drops a marker in
+// the local mount point and asks the remote whether it can see it. A remote
+// that cannot be asked (no runner) is assumed to be a genuinely different
+// machine.
 func refuseSelfMount(runner Runner, localPath, remotePath string) error {
 	if runner == nil {
 		return nil
@@ -220,10 +218,8 @@ func refuseSelfMount(runner Runner, localPath, remotePath string) error {
 	return nil
 }
 
-// prepareMountpoint makes sure localPath is a usable mount point: an existing
-// empty directory, or one this call creates. Mounting over a directory with
-// files in it would hide them for as long as the mount lives, so that is
-// refused rather than done quietly.
+// Mounting over a directory with files in it would hide them for as long as
+// the mount lives, so that is refused rather than done quietly.
 func prepareMountpoint(localPath string) error {
 	info, err := os.Stat(localPath)
 	switch {

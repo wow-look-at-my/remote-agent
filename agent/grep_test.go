@@ -112,7 +112,6 @@ func TestGrepFilesContextNotDuplicatedBetweenNearbyMatches(t *testing.T) {
 
 	result, err := GrepFiles(GrepOptions{Pattern: "MATCH", Path: path, ContextLines: 1})
 	require.NoError(t, err)
-	// Lines 1, 2 (context, emitted once) and 3.
 	require.Len(t, result.Matches, 3)
 	lines := []int{result.Matches[0].Line, result.Matches[1].Line, result.Matches[2].Line}
 	assert.Equal(t, []int{1, 2, 3}, lines)

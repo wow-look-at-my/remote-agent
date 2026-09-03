@@ -43,7 +43,6 @@ func TestHandleEditErrorResponse(t *testing.T) {
 
 func TestHandleLs(t *testing.T) {
 	h, mock := newTestHandler()
-	// The 6-field find format: type, size, mode, time, link target, path.
 	output := "f\t100\t644\t1709300000\t\t/tmp/a.txt\nd\t4096\t755\t1709300000\t\t/tmp/subdir\n"
 	mock.defaultResponse = mockResponse{stdout: []byte(output), exitCode: 0}
 
@@ -63,7 +62,6 @@ func TestHandleLsDefaultPath(t *testing.T) {
 
 func TestHandleLsRecursive(t *testing.T) {
 	h, mock := newTestHandler()
-	// find format has 6 fields: type\tsize\tmode\ttime\tlinktarget\tpath
 	mock.defaultResponse = mockResponse{stdout: []byte("d\t4096\t755\t1709300000\t\t/tmp/dir\n"), exitCode: 0}
 
 	resp := h.handleLs(map[string]any{"path": "/tmp", "recursive": true})
@@ -87,8 +85,8 @@ func TestHandleLsMissingDirErrors(t *testing.T) {
 
 func TestHandleLsPartialListingStillSucceeds(t *testing.T) {
 	h, mock := newTestHandler()
-	// Recursive walks can fail on some subtrees (permission denied) while
-	// still finding entries; the partial listing must be returned.
+	// Recursive walks can fail on some subtrees (permission denied) while still
+	// finding entries; the partial listing must be returned.
 	mock.defaultResponse = mockResponse{
 		stdout:   []byte("f\t100\t644\t1709300000\t\t/tmp/a.txt\n"),
 		stderr:   []byte("find: '/tmp/locked': Permission denied\n"),
@@ -166,11 +164,8 @@ func TestParseInt64(t *testing.T) {
 }
 
 func TestHandleDisconnect(t *testing.T) {
-	// Override exit function to prevent os.Exit during test
+	// The daemon carries its own exit, so the test never reaches os.Exit.
 	done := make(chan struct{})
-	oldExit := exitFunc
-	exitFunc = func(code int) { close(done) }
-	defer func() { exitFunc = oldExit }()
 
 	mock := newMockRunner()
 	d := &Daemon{
@@ -178,13 +173,13 @@ func TestHandleDisconnect(t *testing.T) {
 		remotePath: "/tmp/.remote-agent-test",
 		sockPath:   filepath.Join(t.TempDir(), "test.sock"),
 		pidPath:    filepath.Join(t.TempDir(), "test.pid"),
+		exit:       func(int) { close(done) },
 	}
 	h := &Handler{daemon: d}
 
 	resp := h.handleDisconnect()
 	assert.True(t, resp.OK)
 
-	// Wait for the goroutine to complete before restoring exitFunc
 	<-done
 }
 
@@ -204,7 +199,6 @@ func TestHandleWriteDefaultMode(t *testing.T) {
 	h, mock := newTestHandler()
 	mock.defaultResponse = mockResponse{exitCode: 0}
 
-	// Write without specifying mode (should default to 0644)
 	resp := h.handleWrite(map[string]any{"path": "/tmp/test.txt", "content": "hello", "mode": ""})
 	assert.True(t, resp.OK)
 
@@ -355,7 +349,6 @@ func TestHandleExecAudit(t *testing.T) {
 	assert.True(t, auditSeen, "expected an exec audit entry, got %v", calls)
 }
 
-// Blocks every non-audit command until release closes, to prove two run concurrently.
 type barrierRunner struct {
 	arrived chan string
 	release chan struct{}
@@ -374,10 +367,10 @@ func (r *barrierRunner) RunStdin(command string, stdin []byte) (stdout, stderr [
 	return r.Run(command)
 }
 
-// TestConcurrentExecsDoNotSerialize proves two execs progress simultaneously:
-// both must be inside Run before either is released. Under the old global
-// mutex the second exec could not start until the first finished, and this
-// test would fail at the two-arrivals barrier.
+func (r *barrierRunner) RunTimeout(command string, _ time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
 func TestConcurrentExecsDoNotSerialize(t *testing.T) {
 	runner := &barrierRunner{
 		arrived: make(chan string, 2),
@@ -406,8 +399,6 @@ func TestConcurrentExecsDoNotSerialize(t *testing.T) {
 	d.auditWG.Wait()
 }
 
-// --- New tests for exec ls rewriting, 2>&1 stripping, readlink, symlinks ---
-
 func TestParseLsCommand(t *testing.T) {
 	tests := []struct {
 		cmd       string
@@ -425,7 +416,7 @@ func TestParseLsCommand(t *testing.T) {
 		{"cat /etc/passwd", "", false, false}, // not ls
 		{"", "", false, false},
 		{"lsof", "", false, false}, // not ls
-		// A glob falls through to exec: the handler quotes it and would match nothing.
+		// A glob falls through to exec: the handler quotes it and would match
 		{"ls *.go", "", false, false},
 		{"ls /tmp/*.log", "", false, false},
 		{"ls ?", "", false, false},
@@ -461,11 +452,10 @@ func TestStripTrailingRedirect(t *testing.T) {
 		{"echo 2>&1 hello", "echo 2>&1 hello"}, // not trailing
 		{"2>&1", ""},
 		{"cmd", "cmd"},
-		// Another '>' is present, so 2>&1 fills the log file and must stay.
 		{"make > build.log 2>&1", "make > build.log 2>&1"},
 		{"make >> build.log 2>&1", "make >> build.log 2>&1"},
-		{"a 2>&1 | b 2>&1", "a 2>&1 | b 2>&1"}, // inner 2>&1 contains '>'
-		{"cmd < input 2>&1", "cmd < input"},    // '<' is unaffected by the strip
+		{"a 2>&1 | b 2>&1", "a 2>&1 | b 2>&1"},
+		{"cmd < input 2>&1", "cmd < input"}, // '<' is unaffected by the strip
 	}
 	for _, tt := range tests {
 		got := stripTrailingRedirect(tt.input)
@@ -503,7 +493,6 @@ func TestHandleExecDoesNotRewriteComplexLs(t *testing.T) {
 
 func TestHandleExecStrips2Redirect(t *testing.T) {
 	h, mock := newTestHandler()
-	// The command after stripping 2>&1 should be "whoami"
 	mock.onCommand("whoami", []byte("root\n"), 0)
 
 	resp := h.handleExec(map[string]any{"command": "whoami 2>&1"})

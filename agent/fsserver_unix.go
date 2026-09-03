@@ -15,16 +15,11 @@ import (
 	"github.com/wow-look-at-my/remote-agent/fswire"
 )
 
-// Concurrent, so a large read never stalls the stats behind it. Bounded, so nothing runs out.
+// Concurrent, so a large read never stalls the stats behind it.
 const fsMaxInFlight = 32
 
 // ServeFS runs the remote half of a mount: it reads filesystem requests from
 // in and writes replies to out, serving paths under root.
-//
-// It is deliberately a long-lived process speaking a framed protocol rather
-// than one SSH command per operation. A FUSE mount issues thousands of tiny
-// calls (a single `ls -l` is a lookup plus a stat per entry), and paying a
-// process spawn and a channel open for each one would make the mount unusable.
 func ServeFS(root string, in io.Reader, out io.Writer) error {
 	root = filepath.Clean(root)
 	if root == "" {
@@ -63,7 +58,6 @@ func ServeFS(root string, in io.Reader, out io.Writer) error {
 	}
 }
 
-// fsServer holds the open handles for one mount session.
 type fsServer struct {
 	root   string
 	writer *fswire.Writer
@@ -105,7 +99,7 @@ func (s *fsServer) handle(req *fswire.Request, payload []byte) (*fswire.Response
 		}
 		resp.Target = target
 	case fswire.OpOpen, fswire.OpCreate:
-		// O_APPEND goes: pwrite ignores an offset on it. see docs/mount/behaviour.md
+		// O_APPEND goes: pwrite ignores an offset on it.
 		flags := fswire.LocalOpenFlags(req.Flags) &^ os.O_APPEND
 		if req.Op == fswire.OpCreate {
 			flags |= os.O_CREATE
@@ -269,10 +263,7 @@ func (s *fsServer) setattr(path string, req *fswire.Request) error {
 	return nil
 }
 
-// readdir lists a directory with attributes attached. Stat-ing every entry
-// here is one local syscall each on the remote, and saves the client a
-// network round trip per entry -- the difference between `ls -l` costing one
-// request and costing one per file.
+// readdir lists a directory with attributes attached.
 func (s *fsServer) readdir(path string) ([]fswire.DirEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {

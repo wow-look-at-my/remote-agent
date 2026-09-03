@@ -15,7 +15,8 @@ type Logger struct {
 	fallback bool
 }
 
-// NewLogger creates a syslog logger. Falls back to stderr if syslog is unavailable.
+// NewLogger creates a syslog logger. Falls back to stderr if syslog is
+// unavailable.
 func NewLogger() *Logger {
 	w, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "remote-agent")
 	if err != nil {

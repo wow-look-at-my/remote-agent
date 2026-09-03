@@ -11,7 +11,6 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// GatherSystemInfo collects all system stats in one call.
 func GatherSystemInfo() (*protocol.SystemInfo, error) {
 	info := &protocol.SystemInfo{
 		Arch: runtime.GOARCH,

@@ -8,13 +8,12 @@ import (
 	"sync"
 )
 
-// Bounds a peer's allocation, above FUSE's 1 MiB write. see docs/mount/behaviour.md
+// see docs/mount/behaviour.md
 const MaxPayload = 8 << 20
 
-// A header is small, so this only stops a corrupt length prefix allocating wildly.
+// A header is small, so this only stops a corrupt length prefix allocating
 const MaxHeader = 16 << 20
 
-// Writer is safe for concurrent use: a frame must reach the wire in one piece.
 type Writer struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -25,7 +24,6 @@ func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w}
 }
 
-// WriteFrame writes one header + payload frame.
 func (fw *Writer) WriteFrame(header any, payload []byte) error {
 	data, err := json.Marshal(header)
 	if err != nil {
@@ -61,8 +59,7 @@ func NewReader(r io.Reader) *Reader {
 	return &Reader{r: r}
 }
 
-// ReadFrame reads one frame and unmarshals its header into out, returning the
-// binary payload. io.EOF at a frame boundary means the peer closed cleanly.
+// io.EOF at a frame boundary means the peer closed cleanly.
 func (fr *Reader) ReadFrame(out any) ([]byte, error) {
 	headerLen, err := fr.readLen(MaxHeader, "header")
 	if err != nil {
@@ -93,8 +90,6 @@ func (fr *Reader) ReadFrame(out any) ([]byte, error) {
 	return payload, nil
 }
 
-// readLen reads one length prefix, rejecting implausible values rather than
-// trying to allocate them.
 func (fr *Reader) readLen(max uint32, what string) (uint32, error) {
 	var prefix [4]byte
 	if _, err := io.ReadFull(fr.r, prefix[:]); err != nil {

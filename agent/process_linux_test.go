@@ -15,7 +15,6 @@ func TestParseStat(t *testing.T) {
 	parseStat(info, data)
 	assert.Equal(t, "S", info.State)
 	assert.Equal(t, 1, info.PPID)
-	// RSS is field 23 (index 21 in rest after comm) = 500 pages.
 	assert.Equal(t, int64(500)*int64(os.Getpagesize()), info.RSS)
 }
 

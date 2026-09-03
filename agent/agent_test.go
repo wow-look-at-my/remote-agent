@@ -12,9 +12,12 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// captureStdout redirects stdout to a temp file and returns the captured output.
+// captureStdout redirects stdout to a temp file and returns the captured
+// output.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	t.Serial()
+
 	old := os.Stdout
 	f, err := os.CreateTemp(t.TempDir(), "stdout")
 	require.Nil(t, err)

@@ -16,7 +16,7 @@ import (
 // Paths returned when the caller asks for no limit.
 const DefaultGlobLimit = 500
 
-// Machine-generated trees the walk never enters. A pattern that names one still reaches it.
+// Machine-generated trees the walk never enters.
 var skipDirs = set.Of(".git", "node_modules")
 
 // GlobOptions configures a glob search.
@@ -26,10 +26,8 @@ type GlobOptions struct {
 	Limit   int    // maximum paths to return (default DefaultGlobLimit)
 }
 
-// GlobFiles walks a directory tree and returns the files matching a glob
-// pattern, most recently modified first (the ordering that makes "what did I
-// touch last" queries useful). Directories are not returned -- only files and
-// symlinks, matching what a file-oriented caller expects.
+// Directories are not returned -- only files and symlinks, matching what a
+// file-oriented caller expects.
 func GlobFiles(opts GlobOptions) (*protocol.GlobResult, error) {
 	if opts.Pattern == "" {
 		return nil, fmt.Errorf("glob pattern is required")
@@ -117,8 +115,6 @@ func matchAny(patterns []string, rel string) bool {
 	return false
 }
 
-// matchGlob follows ripgrep semantics, not path.Match: "**" spans segments, "*" and "?"
-// stay inside one, and a pattern with no slash matches the base name at any depth.
 func matchGlob(pattern, name string) bool {
 	if pattern == "" {
 		return false
@@ -156,7 +152,7 @@ func matchSegments(pat, seg []string) bool {
 	return len(seg) == 0
 }
 
-// One segment. A malformed pattern matches nothing, and never fails the walk.
+// A malformed pattern matches nothing, and never fails the walk.
 func segmentMatch(pattern, name string) bool {
 	ok, err := path.Match(pattern, name)
 	return err == nil && ok
@@ -205,8 +201,6 @@ func expandBraces(pattern string) ([]string, error) {
 	return out, nil
 }
 
-// splitAlternatives splits brace alternatives on commas at nesting depth 0,
-// so "a,{b,c}" yields "a" and "{b,c}".
 func splitAlternatives(s string) []string {
 	var out []string
 	depth, start := 0, 0

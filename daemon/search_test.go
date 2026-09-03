@@ -106,7 +106,6 @@ func TestSearchSurfacesRemoteErrors(t *testing.T) {
 	assert.False(t, resp.OK)
 	assert.Contains(t, resp.Error, "no such file")
 
-	// ...a non-zero exit carries stderr instead...
 	h, runner = newTestHandler()
 	runner.defaultResponse = mockResponse{stderr: []byte("helper missing"), exitCode: 127}
 	resp = h.handleGrep(map[string]any{"pattern": "x"})

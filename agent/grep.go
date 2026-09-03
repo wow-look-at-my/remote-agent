@@ -17,9 +17,9 @@ import (
 const (
 	// Results returned when the caller asks for no limit.
 	DefaultGrepLimit = 200
-	// How much of a file's head is sniffed for NUL bytes before it counts as binary.
+	// How much of a file's head is sniffed for NUL bytes before it counts as
 	binarySniffBytes = 8192
-	// Per matching line. A minified bundle otherwise produces a megabyte-long "line".
+	// Per matching line.
 	maxGrepLine = 2000
 )
 
@@ -159,9 +159,9 @@ func grepTargets(root string, includes []string) ([]string, error) {
 	return files, nil
 }
 
-// grepFile scans one file. It reports the matches (content mode only), the
-// total match count, and whether the file was scanned at all -- an unreadable
-// or binary file returns scanned=false so it is not counted.
+// It reports the matches (content mode only), the total match count, and
+// whether the file was scanned at all -- an unreadable or binary file returns
+// scanned=false so it is not counted.
 func grepFile(path string, re *regexp.Regexp, mode string, contextLines int) (matches []protocol.GrepMatch, count int, scanned bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -220,7 +220,7 @@ func grepFile(path string, re *regexp.Regexp, mode string, contextLines int) (ma
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		// An over-long line or an I/O failure keeps what was found, and the file counts.
+		// An over-long line or an I/O failure keeps what was found, and the file
 		return matches, count, true, nil
 	}
 	return matches, count, true, nil

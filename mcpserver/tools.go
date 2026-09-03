@@ -11,13 +11,12 @@ const (
 	defaultReadLines = 2000
 	// maxReadLine caps the length of a single returned line.
 	maxReadLine = 2000
-	// The largest inline image. A bigger one is refused, not turned into base64.
+	// The largest inline image.
 	maxImageBytes = 5 << 20
-	// Per output stream. A build log runs to megabytes, which is context spent for nothing.
+	// Per output stream.
 	maxOutputBytes = 64 << 10
 )
 
-// tool is one MCP tool: the wire-facing declaration plus its handler.
 type tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
@@ -26,14 +25,7 @@ type tool struct {
 	handler func(args map[string]any) ([]contentBlock, error) `json:"-"`
 }
 
-// buildTools declares the toolset. The descriptions matter as much as the
-// schemas: with the built-in file tools switched off, these are the only file
-// tools the model sees, so each one says plainly that it acts on the remote
-// host.
-//
-// Every tool carries the SSH target it acts on, so a call is self-contained:
-// the daemon holding the connection is started on demand for whatever target
-// arrives, and one server can serve several hosts in a session.
+// buildTools declares the toolset.
 func (s *Server) buildTools() []tool {
 	return []tool{
 		s.tool(tool{
@@ -46,6 +38,10 @@ func (s *Server) buildTools() []tool {
 				props{
 					"command": prop("string", "Shell command line, run by the remote user's shell."),
 					"cwd":     prop("string", "Absolute directory on the remote host to run it in (default the remote home directory)."),
+					"timeout": prop("number", fmt.Sprintf(
+						"Seconds to wait before giving up on the command (default %d, maximum %d). "+
+							"The call returns an error at the deadline; the command may still be running on the remote host.",
+						int(protocol.ExecDefaultTimeout.Seconds()), int(protocol.ExecMaxTimeout.Seconds()))),
 				},
 				"command",
 			),
@@ -198,8 +194,8 @@ func (s *Server) tool(t tool) tool {
 	return t
 }
 
-// route resolves where a call goes: which host, and how to reach it. Both come
-// from the call itself, falling back to the server's defaults.
+// route resolves where a call goes: which host, and how to reach it. Both
+// come from the call itself, falling back to the server's defaults.
 func (s *Server) route(args map[string]any) (protocol.Route, error) {
 	target := stringArg(args, "target")
 	if target == "" {
@@ -227,7 +223,6 @@ func schema(p props, required ...string) map[string]any {
 	return s
 }
 
-// addProp adds one property to a schema built by schema().
 func addProp(s map[string]any, name string, p map[string]any) map[string]any {
 	properties, ok := s["properties"].(map[string]any)
 	if !ok {

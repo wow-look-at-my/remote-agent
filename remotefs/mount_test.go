@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build (linux || darwin) && !cosmo
 
 package remotefs_test
 
@@ -83,8 +83,8 @@ func (f *mountFixture) path(rel string) string       { return filepath.Join(f.mn
 func (f *mountFixture) remotePath(rel string) string { return filepath.Join(f.remote, rel) }
 
 // TestMountOrdinaryFileIO is the whole point of the mount: a program that has
-// never heard of remote-agent (here, the Go standard library) reads and writes
-// remote files with plain path operations.
+// never heard of remote-agent (here, the Go standard library) reads and
+// writes remote files with plain path operations.
 func TestMountOrdinaryFileIO(t *testing.T) {
 	f := newMountFixture(t)
 
@@ -132,8 +132,7 @@ func TestMountAppendAndSeek(t *testing.T) {
 func TestMountLargeFile(t *testing.T) {
 	f := newMountFixture(t)
 
-	// Larger than one FUSE write, so the data chunks across many round trips.
-	data := bytes.Repeat([]byte("0123456789abcdef"), 200*1024) // 3.2 MiB
+	data := bytes.Repeat([]byte("0123456789abcdef"), 200*1024)
 	require.NoError(t, os.WriteFile(f.path("big.bin"), data, 0o644))
 
 	back, err := os.ReadFile(f.path("big.bin"))
@@ -230,7 +229,6 @@ func TestMountMissingFileIsENOENT(t *testing.T) {
 	_, err := os.ReadFile(f.path("nope.txt"))
 	assert.True(t, os.IsNotExist(err), "a missing remote file must report ENOENT, got %v", err)
 
-	// Negative lookups are not cached, so a file created behind the mount appears at once.
 	require.NoError(t, os.WriteFile(f.remotePath("appeared.txt"), []byte("new"), 0o644))
 	content, err := os.ReadFile(f.path("appeared.txt"))
 	require.NoError(t, err, "a file created on the remote must be visible without waiting for a cache to expire")
@@ -245,7 +243,7 @@ func TestMountReflectsRemoteChanges(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "before", string(content))
 
-	// A change on the remote, as a forwarded command makes. It can take a cache window.
+	// A change on the remote, as a forwarded command makes.
 	require.NoError(t, os.WriteFile(f.remotePath("shared.txt"), []byte("after-the-change"), 0o644))
 
 	deadline := time.Now().Add(5 * time.Second)

@@ -81,3 +81,21 @@ tests:
 	  outputs:
 		stdout:
 			- user@host:2222 for a non-standard SSH port
+
+	# A model cannot restart its own MCP server, so the deadline on a command has
+	# to be an argument of the call. see docs/daemon/timeouts.md
+	- desc: run_command takes a deadline per call
+	  cmd: RA=$GO_TOOLCHAIN_DATS_BUILD_DIR/remote-agent; "$RA" mcp root@127.0.0.1:2201
+	  inputs:
+		stdin: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+	  outputs:
+		stdout:
+			- Seconds to wait before giving up on the command
+			- the command may still be running on the remote host
+
+	- desc: a deadline that is not a number is refused rather than ignored
+	  cmd: RA=$GO_TOOLCHAIN_DATS_BUILD_DIR/remote-agent; REMOTE_AGENT_TIMEOUT=soon "$RA" --target root@127.0.0.1:47823 exec echo hi
+	  exit: 1
+	  outputs:
+		stderr:
+			- REMOTE_AGENT_TIMEOUT="soon" is not a positive number of seconds

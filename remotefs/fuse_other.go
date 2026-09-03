@@ -1,25 +1,26 @@
-//go:build !linux && !darwin
+//go:build (!linux && !darwin) || cosmo
 
 package remotefs
 
 import "errors"
 
-// Options configures a mount. On platforms without FUSE support it exists
-// only so callers compile.
+// Options configures a mount. In a build without FUSE support it exists only
+// so callers compile.
 type Options struct {
 	AllowOther bool
 	Debug      bool
 	Name       string
 }
 
-// Mount is a live mount. Unreachable on this platform.
+// Mount is a live mount. Unreachable in this build.
 type Mount struct{}
 
-// MountClient reports that mounting is unavailable. FUSE exists only on Linux
-// and macOS; the rest of remote-agent works normally here, so this is a
-// missing feature rather than a broken build.
+// MountClient reports that mounting is unavailable. Everything else works, so
+// this is a missing feature rather than a broken build. see docs/ape.md
 func MountClient(dir string, c *Client, opts Options) (*Mount, error) {
-	return nil, errors.New("mounting a remote filesystem is only supported on linux and macos")
+	return nil, errors.New("this build cannot mount a remote filesystem: it has no FUSE support " +
+		"(a portable build, or a platform without FUSE). Run with --no-mount to reach the remote " +
+		"through remote-agent's own tools instead")
 }
 
 // Dir returns the local mount point.

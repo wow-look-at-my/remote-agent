@@ -236,13 +236,11 @@ func TestPrepareMountpoint(t *testing.T) {
 	require.NoError(t, prepareMountpoint(fresh))
 	assert.DirExists(t, fresh)
 
-	// An existing empty one is accepted.
 	require.NoError(t, prepareMountpoint(t.TempDir()))
 }
 
 func TestDaemonRefusesToMountADirectoryOverItself(t *testing.T) {
 	requireFUSE(t)
-	// A remote that is this machine: one directory, so the probe file is visible remotely.
 	shared := t.TempDir()
 	d := newMountDaemon(t, shared)
 	runner := d.runner.(*mockRunner)
@@ -263,7 +261,7 @@ func TestDaemonMountProceedsWhenRemoteIsDifferent(t *testing.T) {
 	requireFUSE(t)
 	remote := t.TempDir()
 	d := newMountDaemon(t, remote)
-	// The runner answers nothing, so the probe file is invisible: a different machine.
+	// The runner answers nothing, so the probe file is invisible: a different
 	mnt := filepath.Join(t.TempDir(), "mnt")
 	assert.True(t, d.handleMountAction(map[string]any{"local_path": mnt, "remote_path": "/"}).OK)
 }

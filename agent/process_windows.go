@@ -9,7 +9,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// GatherProcessList returns a structured list of running processes using tasklist on Windows.
+// GatherProcessList returns a structured list of running processes using
+// tasklist on Windows.
 func GatherProcessList(filter string) (*protocol.ProcessList, error) {
 	out, err := exec.Command("tasklist", "/FO", "CSV", "/NH").Output()
 	if err != nil {

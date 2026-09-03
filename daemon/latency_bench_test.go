@@ -21,10 +21,6 @@ import (
 const benchRemotePath = "/tmp/.remote-agent-test"
 
 // startBenchSSHServer starts a minimal SSH server that accepts exec requests.
-// Behavior by command:
-//   - "echo pong"                                    -> writes "pong\n", exit 0
-//   - stdin-consuming commands ("cat > ", base64 -d) -> drains stdin, exit 0
-//   - anything else                                  -> no output, exit 0
 func startBenchSSHServer(tb testing.TB) (addr string, cleanup func()) {
 	tb.Helper()
 
@@ -106,9 +102,8 @@ func serveBenchSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	}
 }
 
-// delayLine forwards bytes from src to dst, delivering each chunk one-way
-// delay after it was read. Chunks already in flight do not delay each other,
-// so pipelined traffic is modeled faithfully (like a real network path).
+// Chunks already in flight do not delay each other, so pipelined traffic is
+// modeled faithfully (like a real network path).
 func delayLine(dst, src net.Conn, delay time.Duration) {
 	type chunk struct {
 		data []byte
@@ -139,8 +134,6 @@ func delayLine(dst, src net.Conn, delay time.Duration) {
 	}
 }
 
-// startDelayProxy listens locally and forwards connections to backendAddr with
-// the given one-way delay applied in each direction (RTT = 2*delay).
 func startDelayProxy(tb testing.TB, backendAddr string, delay time.Duration) (addr string, cleanup func()) {
 	tb.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -210,7 +203,6 @@ func TestHandleExecOverRealSSH(t *testing.T) {
 	assert.Equal(t, float64(0), m["exit_code"])
 }
 
-// benchExecOnce runs one exec through the handler and fails the benchmark on error.
 func benchExecOnce(tb testing.TB, h *Handler) {
 	resp := h.handleExec(map[string]any{"command": "true"})
 	if resp.Error != "" {
@@ -218,12 +210,12 @@ func benchExecOnce(tb testing.TB, h *Handler) {
 	}
 }
 
-// Half an RTT. A real RTT is 10-100x larger, and the overhead scales linearly with it.
+// Half an RTT.
 const oneWayDelay = 2 * time.Millisecond
 
-// BenchmarkExecSequentialRTT measures the wall time of sequential execs over a
-// connection with synthetic latency. ns/op divided by the 4ms RTT approximates
-// the number of network round trips each exec costs.
+// BenchmarkExecSequentialRTT measures the wall time of sequential execs over
+// a connection with synthetic latency. ns/op divided by the 4ms RTT
+// approximates the number of network round trips each exec costs.
 func BenchmarkExecSequentialRTT(b *testing.B) {
 	serverAddr, stopServer := startBenchSSHServer(b)
 	defer stopServer()
@@ -242,8 +234,6 @@ func BenchmarkExecSequentialRTT(b *testing.B) {
 	}
 }
 
-// BenchmarkExecParallel4RTT measures 4 goroutines issuing execs concurrently
-// (as parallel agent tool calls do) over a connection with synthetic latency.
 // ns/op is per exec.
 func BenchmarkExecParallel4RTT(b *testing.B) {
 	serverAddr, stopServer := startBenchSSHServer(b)

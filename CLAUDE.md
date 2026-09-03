@@ -11,24 +11,14 @@ around a long-lived local **daemon** that holds one SSH connection, plus a copy 
 the same binary **deployed to the remote** to service operations that need
 structured output there.
 
-It also ships a `claude` launcher (`remote-agent claude [user@host]`) that runs
-Claude Code with `CLAUDE_CODE_SHELL_PREFIX` pointed at a one-line shim
-(`client/shellprefix.sh`, embedded via `//go:embed`). The shim execs the hidden
-`claude-shim` subcommand (`client/claudeshim.go`), which routes each prefix
-invocation: Bash tool commands are laundered and forwarded to the remote
-through the daemon, while hook commands and MCP stdio servers run **locally**
-(see Gotchas). The shim must be a **single-token** program path — Claude's
-prefix wrapper shell-quotes the program name, so a multi-word prefix like
-`remote-agent claude-shim` would be treated as one executable name and fail.
+A model reaches all of it through `remote-agent mcp` (`mcpserver/`), an MCP
+stdio server whose every tool names the host it acts on.
 
-The launcher also **mounts the remote filesystem locally** (`remotefs/`,
-`fswire/`, `agent/fsserver_unix.go`) at the same absolute path the remote uses,
-and runs claude in it. That is what makes Claude's ordinary Read/Write/Edit/
-Glob/Grep -- and any other program, including third-party MCP servers and tools
-that do not exist yet -- operate on the remote host: access goes through the
-kernel, not through a tool-specific bridge. `--no-mount` falls back to serving
-the remote filesystem as MCP tools (`mcpserver/`), which only covers the tools
-remote-agent itself provides.
+It can also **mount the remote filesystem locally** (`remotefs/`, `fswire/`,
+`agent/fsserver_unix.go`), so that ordinary programs -- an editor, a build, a
+tool written after this one -- reach remote files by path, through the kernel
+rather than a tool-specific bridge. That half needs FUSE and a native build; a
+published APE gets the stub (see docs/ape.md).
 
 ## Build, test, lint
 
@@ -81,8 +71,8 @@ A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
 
 Depth the code comments point at, rather than carry:
 
-- `docs/claude/launcher.md` -- mount point identity, tool swap, claude flag form, pinned env.
-- `docs/claude/shim.md` -- the three prefix-wrapped spawn kinds, the Bash wrapper, laundering.
+- `docs/ape.md` -- why a shell starts this binary, which sites do it, why the remote does not need it.
+- `docs/daemon/timeouts.md` -- the deadline on exec, what aborting does, where a caller sets one.
 - `docs/daemon/lifecycle.md` -- target identity and port, ssh_config, idle accounting, shutdown order.
 - `docs/mount/behaviour.md` -- cache windows, mount options, force unmount, open flags.
 - `docs/ssh/connection.md` -- ssh_config resolution, keepalive, the session pool, streams.
@@ -142,7 +132,7 @@ connect.
 | Path | Responsibility |
 |------|----------------|
 | `cmd/` | Cobra commands, one per file, each self-registering in its own `init()`. `serve*.go` are the hidden remote-helper entry points. |
-| `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `launch.go` orchestrates the `claude` launcher (start/reuse daemon, write shim + MCP config, run claude); `shellprefix.sh` is the embedded forwarding shim; `claudeshim.go` classifies and launders what the shim receives (remote Bash tool commands vs local hooks/MCP). |
+| `client/` | Unix-socket client (`client.go`; `autostart.go` resolves the target and starts a daemon when none answers; `Call` returns typed results, the printers in `print.go` render text). `daemonproc.go` starts a daemon and waits for it; `selfexec.go` renders the argv that starts this binary again. |
 | `daemon/` | Long-lived daemon, action router (`handler.go`), operation handlers (`ops.go`, plus `search.go` for glob/grep). |
 | `mcpserver/` | MCP stdio server (JSON-RPC 2.0 over stdin/stdout) exposing remote shells and filesystems as tools. `server.go` is the protocol layer, `tools.go` the declarations and schemas, `handlers.go` the daemon calls behind them. Depends only on a `Backend` interface, satisfied by `client.DaemonBackend`. |
 | `agent/` | Remote-side system/process/file collectors, the search implementations (`glob.go`, `grep.go`), and the mount helper (`fsserver_unix.go`, with `fsstat_*.go` for per-platform stat/statfs); platform files selected by build tag. |
@@ -205,7 +195,7 @@ connect.
   and error). `REMOTE_AGENT_NO_AUTOSTART=1` opts out; `disconnect` and `ping`
   never auto-start, since both exist to ask whether a daemon is there.
 - **Auto-start waits on the daemon process, not just the clock**
-  (`awaitDaemon` in `client/launch.go`). A bad host or rejected key makes
+  (`awaitDaemon` in `client/daemonproc.go`). A bad host or rejected key makes
   `connect` exit in under a second; polling only the socket would hide that
   behind the full 30s readiness timeout, so the process is watched too and its
   log tail is quoted in the error.
@@ -217,53 +207,31 @@ connect.
   flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`). A
   leading `--` argument to `exec` is dropped rather than joined into the remote
   command string (`sh -c '-- cmd'` errors on every shell).
-- **Claude Code v2.1.185+ wraps hooks and MCP stdio servers with
-  CLAUDE_CODE_SHELL_PREFIX too** — not just Bash tool commands. Through a
-  forward-everything shim, hooks broke (claude injects CLAUDE_PROJECT_DIR /
-  CLAUDE_ENV_FILE into the LOCAL spawn env only, and the hook script exists
-  only locally) and MCP stdio servers could never handshake (the remote exec
-  path is buffered request/response with no stdin bridge). `claude-shim`
-  therefore runs hooks and MCP servers **locally by design** (`/bin/sh -c`
-  with inherited env and stdio; exec(2) on Unix), restoring pre-2.1.185
-  semantics. Classification is by the machine-generated glob-setup clause
-  (`{ shopt -u extglob || setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; }
-  >/dev/null 2>&1 || true`) that v2.1.185 embeds in every Bash tool wrapper
-  iff a prefix is set — user hook/MCP command lines cannot plausibly contain
-  it. Misclassification risk is asymmetric: forwarding a hook merely breaks
-  the hook, but running a Bash tool command locally would silently execute it
-  on the wrong machine.
-- **Bash tool wrappers are laundered before forwarding**
-  (`launderBashToolWrapper` in `client/claudeshim.go`). Stripped: (a) the
-  leading `source <local shell-snapshot> 2>/dev/null || true &&` — the
-  snapshot file exists only locally, sourcing a local bash state dump on the
-  remote is wrong on every shell, and on BusyBox ash `source` is the POSIX
-  special builtin `.` whose failed open is a FATAL, silenced abort that made
-  every command return "(No output)" (exit 2, zero bytes); (b) the trailing
-  `&& pwd -P >| <local tmp path>` — it littered the remote /tmp while the
-  local cwd file Claude reads went unwritten ("Shell cwd was reset" after
-  every command). On success, claude-shim writes the local cwd file itself
-  with its own working directory. Everything between the two clauses (the
-  inlined session-env preamble, the glob marker, the eval) is forwarded
-  verbatim. Paths in both clauses may be bare OR single-quoted (Claude quotes
-  only outside `[A-Za-z0-9_./:=@+,-]`); non-matching clauses are left
-  untouched.
-- **Claude's file tools cannot be redirected, so the filesystem moves
-  instead.** Read, Write, Edit, Glob and Grep call Node's `fs` against the
-  machine claude runs on (cli.js: the Read tool reads through the
-  process-local fs accessor); there is no file-tool equivalent of
-  CLAUDE_CODE_SHELL_PREFIX, no env var, and no hook that can rewrite where
-  they land. Replacing them one by one with MCP tools only ever covers the
-  tools we enumerate — third-party MCP servers, editors and anything written
-  later still hit local disk. Mounting the remote filesystem covers all of
-  them at once, because every one of them goes through the kernel.
-- **The mount point defaults to the same absolute path as the remote
-  directory**, and claude runs there. That is not cosmetic: file tools reach
-  files through the mount (local paths) while Bash commands run over SSH
-  (remote paths), so if the two differ, one set of files has two names and the
-  model mixes them. `--mount-at` allows a different local path and the launcher
-  warns when it is used. When the paths do match, the launcher exports
-  `REMOTE_AGENT_MOUNT` and the shim prefixes each forwarded command with `cd
-  <cwd> &&`, which is what finally makes `cd` behave for the common case.
+- **A shell starts this binary, never an execve** (`client.SelfCommand`). A
+  release is a Cosmopolitan APE, whose header is a shell script rather than an
+  ELF header: a shell runs it anywhere (execve answers ENOEXEC and POSIX makes
+  the shell read the file as the script it is), while `os/exec` and an MCP
+  client's own spawn report "exec format error" on a host with no APE binfmt
+  entry -- which a developer machine quietly acquires, because Cosmopolitan
+  registers one when it runs as root. So daemon auto-start and the MCP server
+  command in the launcher's config both name `/bin/sh`, with the binary as its
+  argument. The remote needs nothing: sshd hands the helper's command line to
+  the login shell already. The same build carries no mount -- go-fuse needs
+  Linux-only syscall constants a portable libc cannot define, so `remotefs`'s
+  FUSE half is `!cosmo` and an APE session runs as `--no-mount` does. The
+  remote half is unaffected: `serve fs` is plain file I/O. see docs/ape.md
+- **A remote command carries a deadline, because one that never ends wedges an
+  MCP session** -- the server answers in arrival order, so every later call
+  queues behind it, and a client cannot cancel. `exec` is the only action whose
+  text a caller wrote, so it is the only one bounded; the deadline aborts the
+  SSH session (`sshutil.bounded`) rather than leaking the slot, and says the
+  remote process may outlive the call. `timeout` on `run_command`,
+  `REMOTE_AGENT_TIMEOUT` for the CLI. see docs/daemon/timeouts.md
+- **A mount and a shell disagree about paths unless the mount point is the
+  remote path.** A program reads a mounted file by its LOCAL path while a
+  command runs against the REMOTE one, so a mount at a different local path
+  gives one file two names, and whoever is driving both mixes them. Mount at
+  the same absolute path when anything will do both.
 - **A mount whose session has died is contagious.** Any process that so much
   as stats it blocks in the kernel forever — `df`, shell tab-completion, an
   unrelated test's statfs (this bit during development: a leaked mount from a
@@ -309,26 +277,6 @@ connect.
   idles out mid-session comes back on the next call. `remote-agent mcp
   [user@host]` sets a default; without one the argument is required, because
   the alternative is routing a call to a host nobody named.
-- **--no-mount is the fallback path**, and only there does the launcher pass
-  `--disallowedTools=Read,Write,Edit,NotebookEdit,Glob,Grep` (claude filters
-  denied tools out of the advertised set, so the model never sees them) and
-  register `remote-agent mcp` via `--mcp-config`, whose tools carry the
-  `mcp__remote__` prefix. Only tools that exist are listed: an unknown name
-  produces a "matches no known tool" warning at startup.
-- **The launcher's claude flags must use the `--flag=value` form.**
-  `--mcp-config`, `--disallowedTools` and `--allowedTools` are declared
-  variadic (`<configs...>`, `<tools...>`), so in the space-separated form
-  commander keeps consuming following arguments — it would swallow the user's
-  own prompt and flags. The `=` form binds exactly one value and stops
-  (commander's `/^--[^=]+=/` branch does not set the variadic accumulator).
-  Repeated occurrences concatenate, so the user's own copies of these flags
-  still apply.
-- **Read-only remote tools are pre-allowed, mutating ones are not**
-  (`preAllowedRemoteTools` in `client/launch.go`). MCP tools always prompt on
-  first use, while the built-in Read/Glob/Grep never did; pre-allowing the
-  read-only four restores the permission behaviour of the tools being replaced,
-  and leaving write_file/edit_file/upload_file/download_file out keeps writes
-  gated exactly as Write/Edit were.
 - **The MCP server answers requests strictly in arrival order**
   (`mcpserver/server.go`). Concurrency would speed up batched reads but
   reorders dependent writes — a client sending write_file then edit_file for
@@ -345,10 +293,9 @@ connect.
   Silently replacing the first of several occurrences is unusable for a model
   that cannot see which one changed; the error names the occurrence count so
   the caller knows to add context.
-- `cd` does not *persist* between Bash tool calls: each forwarded command is
-  still a one-shot exec on the remote. With a same-path mount the shim starts
-  each command in claude's working directory (see above), so relative paths
-  work; a `cd` inside one command still does not carry into the next.
+- `cd` does not *persist* between calls: each command is a one-shot exec on the
+  remote. `run_command` takes a `cwd` to start in, and a `cd` inside one command
+  still does not carry into the next.
 - **Commands ride an OpenSSH control master when one answers** on the
   ControlPath `ssh -G` reports for the host, instead of dialing and
   authenticating a second connection -- which is what makes a host behind a
@@ -388,9 +335,9 @@ connect.
   (`client.TargetOverride`) and `REMOTE_AGENT_TARGET` (hashed via
   `daemon.SocketPath`), before falling back to globbing a single socket in
   `TempDir`. It returns a path whether or not anything listens there --
-  `sendRequest` starts a daemon when nothing answers. The `claude`
-  launcher exports `REMOTE_AGENT_SOCKET` (and `REMOTE_AGENT_TARGET`) so forwarded commands hit the right daemon
-  even when several are running.
+  `sendRequest` starts a daemon when nothing answers. Export
+  `REMOTE_AGENT_SOCKET` (or `REMOTE_AGENT_TARGET`) to pin a command to one
+  daemon when several are running.
 
 ## Adding a command
 
@@ -402,8 +349,6 @@ connect.
 4. Any new result type in `protocol/types.go`. Then run `go-toolchain`.
 5. Add a tool for it in `mcpserver/tools.go` (declaration) plus its handler in
    `mcpserver/handlers.go` (`s.route(args)`, then `s.backend.Call(route, ...)`)
-   — that is how the model reaches it through `remote-agent mcp` in any client,
-   and through `remote-agent claude --no-mount`. Anything the command needs to
-   be told is an argument on the tool, per the per-call rule in Conventions. A
-   mounted claude session needs nothing extra for *file* access: the model
-   reaches files with its ordinary tools through the mount.
+   — that is how a model reaches it through `remote-agent mcp` in any client.
+   Anything the command needs to be told is an argument on the tool, per the
+   per-call rule in Conventions.

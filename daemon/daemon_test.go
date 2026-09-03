@@ -26,8 +26,6 @@ func TestSocketPath(t *testing.T) {
 
 }
 
-// Several endpoints behind one user@host, on different ports, are the whole
-// reason the port is part of the key.
 func TestSocketPathSeparatesPorts(t *testing.T) {
 	bare := SocketPath("root@127.0.0.1")
 	first := SocketPath("root@127.0.0.1:2201")
@@ -42,8 +40,6 @@ func TestSocketPathSeparatesPorts(t *testing.T) {
 	assert.NotEqual(t, TargetPath("root@127.0.0.1:2201"), TargetPath("root@127.0.0.1:2202"))
 }
 
-// Every spelling of one endpoint keys on the same socket, whichever way the
-// port arrived.
 func TestSocketPathCanonicalizes(t *testing.T) {
 	merged, err := CanonicalTarget("root@127.0.0.1", 2201)
 	require.NoError(t, err)
@@ -64,8 +60,7 @@ func TestSocketAndPIDPathDiffer(t *testing.T) {
 
 }
 
-// Start refuses a target and a --port that name two different endpoints. It
-// fails before it dials, so the test needs no SSH host.
+// It fails before it dials, so the test needs no SSH host.
 func TestStartRejectsConflictingPorts(t *testing.T) {
 	err := Start(StartOptions{Target: "root@127.0.0.1:2201", Port: 2202})
 	require.Error(t, err)
@@ -179,7 +174,6 @@ func TestShutdownWithRunner(t *testing.T) {
 
 }
 
-// Delays audits and records the order, to prove shutdown drains them first.
 type slowAuditRunner struct {
 	mu        sync.Mutex
 	completed []string
@@ -197,6 +191,10 @@ func (r *slowAuditRunner) Run(command string) (stdout, stderr []byte, exitCode i
 }
 
 func (r *slowAuditRunner) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
+func (r *slowAuditRunner) RunTimeout(command string, _ time.Duration) (stdout, stderr []byte, exitCode int, err error) {
 	return r.Run(command)
 }
 
@@ -311,7 +309,7 @@ func TestDeployBinaryDataUploadsWhenNotCached(t *testing.T) {
 	assert.Equal(t, wantPath, path)
 	assert.True(t, cachedDeploy(path))
 
-	// stdin to a temp path, chmod, then mv: a concurrent connect never sees a partial file.
+	// stdin to a temp path, chmod, then mv: a concurrent connect never sees a
 	uploads := 0
 	for _, c := range mock.snapshotCalls() {
 		if c.Stdin != nil {
@@ -408,9 +406,7 @@ func TestSshRunner(t *testing.T) {
 	var _ Runner = (*sshutil.CommandRunner)(nil)
 }
 
-// startPingListener stands up a Unix socket that accepts one connection and
-// replies to a request with a valid DaemonResponse, using the same JSON framing
-// the real daemon uses. It returns a cleanup that closes the listener.
+// It returns a cleanup that closes the listener.
 func startPingListener(t *testing.T, sockPath string) func() {
 	t.Helper()
 	l, err := net.Listen("unix", sockPath)
@@ -469,24 +465,18 @@ func TestOpStartEndTracksActivity(t *testing.T) {
 }
 
 func TestWatchIdleWaitsForActiveOps(t *testing.T) {
-	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
-	defer func() {
-		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
-	}()
-
-	idleTimeout = 1 * time.Millisecond
-	idleCheckInterval = 5 * time.Millisecond
-
 	done := make(chan struct{})
 	var once sync.Once
-	exitFunc = func(code int) { once.Do(func() { close(done) }) }
 
 	d := &Daemon{
-		sockPath:     filepath.Join(t.TempDir(), "busy.sock"),
-		pidPath:      filepath.Join(t.TempDir(), "busy.pid"),
-		lastActivity: time.Now().Add(-1 * time.Hour), // long past the idle timeout
+		sockPath:          filepath.Join(t.TempDir(), "busy.sock"),
+		pidPath:           filepath.Join(t.TempDir(), "busy.pid"),
+		lastActivity:      time.Now().Add(-1 * time.Hour), // long past the idle timeout
+		idleTimeout:       1 * time.Millisecond,
+		idleCheckInterval: 5 * time.Millisecond,
+		exit:              func(int) { once.Do(func() { close(done) }) },
 	}
-	// Simulate a long-running command (e.g. a 40-minute build) in flight.
+	// Simulate a long-running command (e.g.
 	d.opStart()
 
 	go d.watchIdle()
@@ -498,7 +488,6 @@ func TestWatchIdleWaitsForActiveOps(t *testing.T) {
 		// good: several ticks passed without a shutdown
 	}
 
-	// Once the operation completes, the idle countdown restarts and may fire.
 	d.opEnd()
 	select {
 	case <-done:
@@ -508,22 +497,16 @@ func TestWatchIdleWaitsForActiveOps(t *testing.T) {
 }
 
 func TestWatchIdleShutdown(t *testing.T) {
-	oldTimeout, oldInterval, oldExit := idleTimeout, idleCheckInterval, exitFunc
-	defer func() {
-		idleTimeout, idleCheckInterval, exitFunc = oldTimeout, oldInterval, oldExit
-	}()
-
-	idleTimeout = 1 * time.Millisecond
-	idleCheckInterval = 10 * time.Millisecond
-
 	done := make(chan struct{})
 	var once sync.Once
-	exitFunc = func(code int) { once.Do(func() { close(done) }) }
 
 	d := &Daemon{
-		sockPath:     filepath.Join(t.TempDir(), "idle.sock"),
-		pidPath:      filepath.Join(t.TempDir(), "idle.pid"),
-		lastActivity: time.Now().Add(-1 * time.Hour),
+		sockPath:          filepath.Join(t.TempDir(), "idle.sock"),
+		pidPath:           filepath.Join(t.TempDir(), "idle.pid"),
+		lastActivity:      time.Now().Add(-1 * time.Hour),
+		idleTimeout:       1 * time.Millisecond,
+		idleCheckInterval: 10 * time.Millisecond,
+		exit:              func(int) { once.Do(func() { close(done) }) },
 	}
 
 	go d.watchIdle()

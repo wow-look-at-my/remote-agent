@@ -70,7 +70,6 @@ func TestCanonicalTargetMergesPort(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "root@127.0.0.1:2201", got)
 
-	// A port in the target needs no help, and the same port twice agrees.
 	got, err = CanonicalTarget("root@127.0.0.1:2201", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "root@127.0.0.1:2201", got)

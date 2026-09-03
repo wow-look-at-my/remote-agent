@@ -30,8 +30,8 @@ func TestPortableOpenFlagsAccessMode(t *testing.T) {
 }
 
 func TestLocalOpenFlagsNeverCreates(t *testing.T) {
-	// O_CREATE has no wire representation: an open must never create a file
-	// as a side effect of a flag translation.
+	// O_CREATE has no wire representation: an open must never create a file as a
+	// side effect of a flag translation.
 	for portable := uint32(0); portable <= OpenRead|OpenWrite|OpenAppend|OpenTrunc|OpenExcl|OpenSync; portable++ {
 		assert.Zero(t, LocalOpenFlags(portable)&os.O_CREATE, "portable flags 0x%x must not imply O_CREATE", portable)
 	}

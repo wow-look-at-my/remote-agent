@@ -101,7 +101,7 @@ The same flag works on every CLI command:
 ```sh
 remote-agent --target root@10.0.0.7 --control-path /tmp/cm.sock exec 'uptime'
 remote-agent connect root@10.0.0.7 --control-path /tmp/cm.sock
-remote-agent claude root@10.0.0.7 --control-path /tmp/cm.sock
+remote-agent --control-path /tmp/cm.sock mcp root@10.0.0.7
 ```
 
 ## What it does not do

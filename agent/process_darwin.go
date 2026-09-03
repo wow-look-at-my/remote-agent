@@ -9,7 +9,8 @@ import (
 	"github.com/wow-look-at-my/remote-agent/protocol"
 )
 
-// GatherProcessList returns a structured list of running processes using ps on macOS.
+// GatherProcessList returns a structured list of running processes using ps
+// on macOS.
 func GatherProcessList(filter string) (*protocol.ProcessList, error) {
 	out, err := exec.Command("ps", "-axo", "pid,ppid,stat,rss,user,args").Output()
 	if err != nil {

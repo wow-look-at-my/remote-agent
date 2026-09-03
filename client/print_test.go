@@ -46,6 +46,7 @@ func asMap(t *testing.T, v any) map[string]any {
 }
 
 func TestPrintGlobText(t *testing.T) {
+	t.Serial()
 	payload := asMap(t, protocol.GlobResult{
 		Files:     []string{"/srv/a.go", "/srv/b.go"},
 		Truncated: true,
@@ -56,6 +57,7 @@ func TestPrintGlobText(t *testing.T) {
 }
 
 func TestPrintGrepTextContent(t *testing.T) {
+	t.Serial()
 	payload := asMap(t, protocol.GrepResult{
 		Mode: protocol.GrepModeContent,
 		Matches: []protocol.GrepMatch{
@@ -69,6 +71,7 @@ func TestPrintGrepTextContent(t *testing.T) {
 }
 
 func TestPrintGrepTextFilesAndCounts(t *testing.T) {
+	t.Serial()
 	files := asMap(t, protocol.GrepResult{Mode: protocol.GrepModeFiles, Files: []string{"/srv/a.go"}})
 	out := capturePrinted(t, func() { require.NoError(t, printGrepText(files)) })
 	assert.Equal(t, "/srv/a.go\n", out)
@@ -82,6 +85,7 @@ func TestPrintGrepTextFilesAndCounts(t *testing.T) {
 }
 
 func TestPrintGrepTextEmpty(t *testing.T) {
+	t.Serial()
 	out := capturePrinted(t, func() {
 		require.NoError(t, printGrepText(map[string]any{"mode": protocol.GrepModeContent}))
 	})
@@ -89,6 +93,7 @@ func TestPrintGrepTextEmpty(t *testing.T) {
 }
 
 func TestGlobAndGrepClients(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 
@@ -99,22 +104,25 @@ func TestGlobAndGrepClients(t *testing.T) {
 }
 
 func TestGlobAndGrepWithoutDaemon(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.Error(t, Glob("*", ".", 0))
 	assert.Error(t, Grep("x", ".", "", "", false, 0, 0))
 }
 
 func TestCallDecodesTypedResults(t *testing.T) {
+	t.Serial()
 	cleanup := startMockDaemon(t)
 	defer cleanup()
 
-	// The mock answers an unknown action with an empty OK, and Call must still succeed.
+	// The mock answers an unknown action with an empty OK, and Call must still
 	var listing protocol.DirListing
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, &listing))
 	assert.NoError(t, Call("ls", map[string]any{"path": "/srv"}, nil))
 }
 
 func TestCallReportsDaemonErrors(t *testing.T) {
+	t.Serial()
 	cleanup := startErrorDaemon(t)
 	defer cleanup()
 
@@ -123,13 +131,14 @@ func TestCallReportsDaemonErrors(t *testing.T) {
 }
 
 func TestCallWithoutDaemon(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	assert.Error(t, Call("ls", nil, nil))
 }
 
 func TestDaemonBackendDelegatesToCall(t *testing.T) {
+	t.Serial()
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("REMOTE_AGENT_NO_AUTOSTART", "1")
-	// No daemon for this target: the adapter fails rather than answer from another one.
 	assert.Error(t, DaemonBackend{}.Call(protocol.Route{Target: "root@host"}, "read", map[string]any{"path": "/x"}, nil))
 }
