@@ -80,10 +80,19 @@ func (c *ControlConn) Run(command string) (stdout, stderr []byte, exitCode int, 
 	return c.RunStdin(command, nil)
 }
 
+// RunTimeout executes a command and abandons it after d, ending its session.
+func (c *ControlConn) RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	return c.runStdin(command, nil, d)
+}
+
 // RunStdin executes a command with stdin piped to it. A nil stdin still
 // closes the command's stdin immediately, so a command that reads sees EOF
 // instead of blocking forever.
 func (c *ControlConn) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return c.runStdin(command, stdin, 0)
+}
+
+func (c *ControlConn) runStdin(command string, stdin []byte, timeout time.Duration) (stdout, stderr []byte, exitCode int, err error) {
 	c.sem <- struct{}{}
 	defer func() { <-c.sem }()
 
@@ -93,6 +102,16 @@ func (c *ControlConn) RunStdin(command string, stdin []byte) (stdout, stderr []b
 	}
 	defer sess.Close()
 
+	// Closing the session tells the master to tear the command down, which is
+	// what unblocks the wait below when the deadline expires.
+	res := bounded(timeout, func() { sess.Close() }, func() CommandResult {
+		return runMuxSession(sess, stdin)
+	})
+	return res.Stdout, res.Stderr, res.ExitCode, res.Err
+}
+
+// runMuxSession pumps one open session to completion.
+func runMuxSession(sess *muxSession, stdin []byte) CommandResult {
 	var outBuf, errBuf safeBuffer
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -101,16 +120,16 @@ func (c *ControlConn) RunStdin(command string, stdin []byte) (stdout, stderr []b
 
 	if len(stdin) > 0 {
 		if _, err := sess.stdin.Write(stdin); err != nil {
-			return nil, nil, -1, fmt.Errorf("write stdin: %w", err)
+			return CommandResult{ExitCode: -1, Started: true, Err: fmt.Errorf("write stdin: %w", err)}
 		}
 	}
 	// EOF on stdin, from a half-close: the command's other two fds stay open.
 	sess.stdin.CloseWrite()
 
-	exitCode, err = sess.wait()
+	exitCode, err := sess.wait()
 	// The master closes the stdio fds as the session ends, so these finish.
 	wg.Wait()
-	return outBuf.Bytes(), errBuf.Bytes(), exitCode, err
+	return CommandResult{Stdout: outBuf.Bytes(), Stderr: errBuf.Bytes(), ExitCode: exitCode, Err: err, Started: true}
 }
 
 // StartStream runs a command whose stdin and stdout stay open as a

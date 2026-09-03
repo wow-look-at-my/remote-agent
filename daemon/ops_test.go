@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/wow-look-at-my/remote-agent/protocol"
@@ -26,6 +27,7 @@ type mockRunner struct {
 type mockCall struct {
 	Command string
 	Stdin   []byte
+	Timeout time.Duration
 }
 
 type mockResponse struct {
@@ -49,6 +51,16 @@ func (m *mockRunner) Run(command string) (stdout, stderr []byte, exitCode int, e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, mockCall{Command: command})
+	if resp, ok := m.responses[command]; ok {
+		return resp.stdout, resp.stderr, resp.exitCode, resp.err
+	}
+	return m.defaultResponse.stdout, m.defaultResponse.stderr, m.defaultResponse.exitCode, m.defaultResponse.err
+}
+
+func (m *mockRunner) RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, mockCall{Command: command, Timeout: d})
 	if resp, ok := m.responses[command]; ok {
 		return resp.stdout, resp.stderr, resp.exitCode, resp.err
 	}

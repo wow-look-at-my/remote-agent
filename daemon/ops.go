@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/protocol"
@@ -15,6 +16,27 @@ import (
 type Runner interface {
 	Run(command string) (stdout, stderr []byte, exitCode int, err error)
 	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+	// RunTimeout gives up on a command after d and tears its session down.
+	RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error)
+}
+
+// execTimeout reads the per-call bound, in seconds, and falls back to the
+// default. Only exec is open-ended: cat, find and the helper subcommands all
+// end on their own, while a command a caller wrote the text of may never end,
+// and one such wait wedges a whole MCP session. see docs/daemon/timeouts.md
+func execTimeout(params map[string]any) (time.Duration, error) {
+	secs, ok := params["timeout"].(float64)
+	if !ok || secs == 0 {
+		return protocol.ExecDefaultTimeout, nil
+	}
+	if secs < 0 {
+		return 0, fmt.Errorf("timeout must be a positive number of seconds, got %v", secs)
+	}
+	d := time.Duration(secs * float64(time.Second))
+	if d > protocol.ExecMaxTimeout {
+		return 0, fmt.Errorf("timeout %s is above the %s maximum", d, protocol.ExecMaxTimeout)
+	}
+	return d, nil
 }
 
 func (h *Handler) handlePing() *protocol.DaemonResponse {
@@ -36,13 +58,18 @@ func (h *Handler) handleExec(params map[string]any) *protocol.DaemonResponse {
 		return h.handleLs(map[string]any{"path": lsPath, "recursive": recursive})
 	}
 
+	timeout, err := execTimeout(params)
+	if err != nil {
+		return errResponse(err)
+	}
+
 	// Strip pointless trailing 2>&1 — stderr is already captured separately
 	command = stripTrailingRedirect(command)
 
 	// Audit log the command (concurrently, on its own SSH channel).
 	h.daemon.auditAsync("exec", command)
 
-	stdout, stderr, exitCode, err := h.daemon.runner.Run(command)
+	stdout, stderr, exitCode, err := h.daemon.runner.RunTimeout(command, timeout)
 	if err != nil {
 		return errResponse(fmt.Errorf("exec failed: %w", err))
 	}
@@ -252,7 +279,7 @@ func (h *Handler) handleEdit(params map[string]any) *protocol.DaemonResponse {
 
 	// Use remote helper for atomic edit
 	cmd := fmt.Sprintf("%s serve edit --path %s --old %s --new %s",
-		h.daemon.remotePath, shellEscape(path), shellEscape(oldText), shellEscape(newText))
+		h.daemon.helper(), shellEscape(path), shellEscape(oldText), shellEscape(newText))
 	if replaceAll {
 		cmd += " --replace-all"
 	}
@@ -381,7 +408,7 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 	filter, _ := params["filter"].(string)
 
 	// Use remote helper for structured output
-	cmd := h.daemon.remotePath + " serve ps"
+	cmd := h.daemon.helper() + " serve ps"
 	if filter != "" {
 		cmd += " --filter " + shellEscape(filter)
 	}
@@ -402,7 +429,7 @@ func (h *Handler) handlePs(params map[string]any) *protocol.DaemonResponse {
 
 func (h *Handler) handleSysinfo() *protocol.DaemonResponse {
 	// Use remote helper
-	cmd := h.daemon.remotePath + " serve sysinfo"
+	cmd := h.daemon.helper() + " serve sysinfo"
 	stdout, stderr, exitCode, err := h.daemon.runner.Run(cmd)
 	if err != nil {
 		return errResponse(fmt.Errorf("sysinfo failed: %w", err))

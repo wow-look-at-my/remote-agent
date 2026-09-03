@@ -1,5 +1,17 @@
 package protocol
 
+import "time"
+
+// The bound on an exec: the daemon enforces it, and the CLI flag and the MCP
+// tool schema describe it, so all three read one definition rather than three
+// numbers that drift apart. see docs/daemon/timeouts.md
+const (
+	// ExecDefaultTimeout applies when a call names no timeout of its own.
+	ExecDefaultTimeout = 10 * time.Minute
+	// ExecMaxTimeout is the longest a call may ask for.
+	ExecMaxTimeout = 6 * time.Hour
+)
+
 // DaemonRequest is sent from CLI to the local daemon over the Unix socket.
 type DaemonRequest struct {
 	Action string         `json:"action"`

@@ -25,7 +25,7 @@ func (h *Handler) handleGlob(params map[string]any) *protocol.DaemonResponse {
 
 	// The helper walks the tree: one round trip, and no dependency on the remote's find.
 	cmd := fmt.Sprintf("%s serve glob --pattern %s --path %s",
-		h.daemon.remotePath, shellEscape(pattern), shellEscape(path))
+		h.daemon.helper(), shellEscape(pattern), shellEscape(path))
 	if limit > 0 {
 		cmd += fmt.Sprintf(" --limit %d", limit)
 	}
@@ -53,7 +53,7 @@ func (h *Handler) handleGrep(params map[string]any) *protocol.DaemonResponse {
 	}
 
 	cmd := fmt.Sprintf("%s serve grep --pattern %s --path %s",
-		h.daemon.remotePath, shellEscape(pattern), shellEscape(path))
+		h.daemon.helper(), shellEscape(pattern), shellEscape(path))
 	if include != "" {
 		cmd += " --include " + shellEscape(include)
 	}

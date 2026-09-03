@@ -81,6 +81,8 @@ A `Makefile` exists for plain-`go` users (`make build`, `make build-linux`,
 
 Depth the code comments point at, rather than carry:
 
+- `docs/ape.md` -- why a shell starts this binary, which sites do it, why the remote does not need it.
+- `docs/daemon/timeouts.md` -- the deadline on exec, what aborting does, where a caller sets one.
 - `docs/claude/launcher.md` -- mount point identity, tool swap, claude flag form, pinned env.
 - `docs/claude/shim.md` -- the three prefix-wrapped spawn kinds, the Bash wrapper, laundering.
 - `docs/daemon/lifecycle.md` -- target identity and port, ssh_config, idle accounting, shutdown order.
@@ -217,6 +219,23 @@ connect.
   flags falls through to raw `exec` (`parseLsCommand` in `daemon/ops.go`). A
   leading `--` argument to `exec` is dropped rather than joined into the remote
   command string (`sh -c '-- cmd'` errors on every shell).
+- **A shell starts this binary, never an execve** (`client.SelfCommand`). A
+  release is a Cosmopolitan APE, whose header is a shell script rather than an
+  ELF header: a shell runs it anywhere (execve answers ENOEXEC and POSIX makes
+  the shell read the file as the script it is), while `os/exec` and an MCP
+  client's own spawn report "exec format error" on a host with no APE binfmt
+  entry -- which a developer machine quietly acquires, because Cosmopolitan
+  registers one when it runs as root. So daemon auto-start and the MCP server
+  command in the launcher's config both name `/bin/sh`, with the binary as its
+  argument. The remote needs nothing: sshd hands the helper's command line to
+  the login shell already. see docs/ape.md
+- **A remote command carries a deadline, because one that never ends wedges an
+  MCP session** -- the server answers in arrival order, so every later call
+  queues behind it, and a client cannot cancel. `exec` is the only action whose
+  text a caller wrote, so it is the only one bounded; the deadline aborts the
+  SSH session (`sshutil.bounded`) rather than leaking the slot, and says the
+  remote process may outlive the call. `timeout` on `run_command`,
+  `REMOTE_AGENT_TIMEOUT` for the CLI and the shim. see docs/daemon/timeouts.md
 - **Claude Code v2.1.185+ wraps hooks and MCP stdio servers with
   CLAUDE_CODE_SHELL_PREFIX too** — not just Bash tool commands. Through a
   forward-everything shim, hooks broke (claude injects CLAUDE_PROJECT_DIR /

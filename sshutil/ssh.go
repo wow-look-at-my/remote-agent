@@ -84,6 +84,8 @@ func ResolveSSHConfig(user, host string, port int) *SSHConfig {
 type Conn interface {
 	Run(command string) (stdout, stderr []byte, exitCode int, err error)
 	RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+	// A command the caller gives up on after d, rather than waiting on one that never ends.
+	RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error)
 	// A command whose stdin and stdout stay open as one byte stream, for the mount.
 	StartStream(command string) (io.ReadWriteCloser, error)
 	Close() error

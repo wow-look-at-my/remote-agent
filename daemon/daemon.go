@@ -58,11 +58,19 @@ func (d *Daemon) opEnd() {
 	d.mu.Unlock()
 }
 
+// helper is the command word for the deployed helper. It is quoted like every
+// other argument, because a remote home directory may hold a space. The
+// remote's shell runs it: that is also what starts an APE, so the helper is
+// never handed to an execve of its own. see docs/ape.md
+func (d *Daemon) helper() string {
+	return shellEscape(d.remotePath)
+}
+
 // auditAsync audits on its own SSH channel, so the operation does not wait for it.
 // Failures are ignored; shutdown drains what is in flight. see docs/daemon/lifecycle.md
 func (d *Daemon) auditAsync(action, detail string) {
 	cmd := fmt.Sprintf("%s serve audit --action %s --detail %s",
-		d.remotePath, shellEscape(action), shellEscape(detail))
+		d.helper(), shellEscape(action), shellEscape(detail))
 	d.auditWG.Add(1)
 	go func() {
 		defer d.auditWG.Done()
@@ -167,7 +175,7 @@ func Start(opts StartOptions) error {
 
 	// Through a master there is no key of ours, so the entry names the master instead.
 	auditCmd := fmt.Sprintf("%s serve audit --action startup --user %s --client-ip %s --fingerprint %s --detail %s",
-		remotePath, shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
+		shellEscape(remotePath), shellEscape(user), shellEscape(conn.Host), shellEscape(conn.Fingerprint), shellEscape(connectionDetail(conn)))
 	runner.Run(auditCmd)
 
 	d := &Daemon{
@@ -294,12 +302,12 @@ func (d *Daemon) shutdown() {
 	d.auditWG.Wait()
 
 	if d.runner != nil {
-		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.remotePath)
+		auditCmd := fmt.Sprintf("%s serve audit --action shutdown", d.helper())
 		d.runner.Run(auditCmd)
 
 		// A cached helper stays for the next connect to reuse.
 		if !d.keepBinary {
-			d.runner.Run(fmt.Sprintf("rm -f %s", d.remotePath))
+			d.runner.Run(fmt.Sprintf("rm -f %s", d.helper()))
 		}
 	}
 

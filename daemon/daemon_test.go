@@ -200,6 +200,10 @@ func (r *slowAuditRunner) RunStdin(command string, stdin []byte) (stdout, stderr
 	return r.Run(command)
 }
 
+func (r *slowAuditRunner) RunTimeout(command string, _ time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
 func TestShutdownDrainsPendingAudits(t *testing.T) {
 	runner := &slowAuditRunner{delay: 50 * time.Millisecond}
 	d := &Daemon{

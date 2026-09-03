@@ -196,8 +196,13 @@ func (s *Server) runCommand(args map[string]any) ([]contentBlock, error) {
 		command = "cd " + shellQuote(cwd) + " && " + command
 	}
 
+	params := map[string]any{"command": command}
+	if timeout := floatArg(args, "timeout"); timeout != 0 {
+		params["timeout"] = timeout
+	}
+
 	var reply execReply
-	if err := s.backend.Call(route, "exec", map[string]any{"command": command}, &reply); err != nil {
+	if err := s.backend.Call(route, "exec", params, &reply); err != nil {
 		return nil, err
 	}
 	if reply.Entries != nil {
@@ -436,6 +441,11 @@ func stringArg(args map[string]any, key string) string {
 
 func boolArg(args map[string]any, key string) bool {
 	v, _ := args[key].(bool)
+	return v
+}
+
+func floatArg(args map[string]any, key string) float64 {
+	v, _ := args[key].(float64)
 	return v
 }
 

@@ -374,6 +374,10 @@ func (r *barrierRunner) RunStdin(command string, stdin []byte) (stdout, stderr [
 	return r.Run(command)
 }
 
+func (r *barrierRunner) RunTimeout(command string, _ time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	return r.Run(command)
+}
+
 // TestConcurrentExecsDoNotSerialize proves two execs progress simultaneously:
 // both must be inside Run before either is released. Under the old global
 // mutex the second exec could not start until the first finished, and this

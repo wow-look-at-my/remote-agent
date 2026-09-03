@@ -257,6 +257,11 @@ for (remembered in a small file beside the socket). Set
 `REMOTE_AGENT_NO_AUTOSTART=1` to require an explicit `connect` instead;
 `disconnect` and `ping` never start one.
 
+A remote command that never ends would otherwise hold its caller forever, so
+`exec` gives up after ten minutes and says so. Set `REMOTE_AGENT_TIMEOUT` (in
+seconds) for a longer or shorter one; through MCP it is the `timeout` argument
+on `run_command`. See [docs/daemon/timeouts.md](docs/daemon/timeouts.md).
+
 ## Development
 
 ```sh

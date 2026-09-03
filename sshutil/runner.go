@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -38,7 +39,7 @@ func NewCommandRunner(client *ssh.Client) *CommandRunner {
 
 // Run executes a command and returns stdout, stderr, and the exit code.
 func (r *CommandRunner) Run(command string) (stdout, stderr []byte, exitCode int, err error) {
-	return r.run(command, nil)
+	return r.run(command, nil, 0)
 }
 
 // RunStdin executes a command with the given bytes piped to its stdin.
@@ -46,10 +47,15 @@ func (r *CommandRunner) RunStdin(command string, stdin []byte) (stdout, stderr [
 	if stdin == nil {
 		stdin = []byte{}
 	}
-	return r.run(command, stdin)
+	return r.run(command, stdin, 0)
 }
 
-func (r *CommandRunner) run(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+// RunTimeout executes a command and abandons it after d, closing its session.
+func (r *CommandRunner) RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error) {
+	return r.run(command, nil, d)
+}
+
+func (r *CommandRunner) run(command string, stdin []byte, timeout time.Duration) (stdout, stderr []byte, exitCode int, err error) {
 	r.sem <- struct{}{}
 	defer func() { <-r.sem }()
 
@@ -57,18 +63,28 @@ func (r *CommandRunner) run(command string, stdin []byte) (stdout, stderr []byte
 	if err != nil {
 		return nil, nil, -1, err
 	}
-	stdout, stderr, exitCode, started, err := execOnSession(sess, command, stdin)
-	sess.Close()
-	if !started && fromSpare {
+	res := r.execBounded(sess, command, stdin, timeout)
+	if !res.Started && fromSpare {
 		// The spare went stale before the exec, so the command never began and a retry is safe.
 		fresh, ferr := r.client.NewSession()
 		if ferr != nil {
-			return nil, nil, -1, err
+			return nil, nil, -1, res.Err
 		}
-		defer fresh.Close()
-		stdout, stderr, exitCode, _, err = execOnSession(fresh, command, stdin)
+		res = r.execBounded(fresh, command, stdin, timeout)
 	}
-	return stdout, stderr, exitCode, err
+	return res.Stdout, res.Stderr, res.ExitCode, res.Err
+}
+
+// execBounded runs one command on sess under the deadline, and closes the
+// session on every path out.
+func (r *CommandRunner) execBounded(sess *ssh.Session, command string, stdin []byte, timeout time.Duration) CommandResult {
+	// Closing the session is what unblocks Wait, so an abandoned run unwinds.
+	abort := func() { sess.Signal(ssh.SIGKILL); sess.Close() }
+	return bounded(timeout, abort, func() CommandResult {
+		stdout, stderr, exitCode, started, err := execOnSession(sess, command, stdin)
+		sess.Close()
+		return CommandResult{Stdout: stdout, Stderr: stderr, ExitCode: exitCode, Err: err, Started: started}
+	})
 }
 
 // takeSession returns a session for one command, preferring a pre-opened

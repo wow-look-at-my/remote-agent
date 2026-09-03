@@ -72,7 +72,7 @@ func (d *Daemon) mount(localPath, remotePath string, allowOther bool) error {
 		return err
 	}
 
-	command := fmt.Sprintf("%s serve fs --root %s", d.remotePath, shellEscape(remotePath))
+	command := fmt.Sprintf("%s serve fs --root %s", d.helper(), shellEscape(remotePath))
 	stream, err := d.startStream(command)
 	if err != nil {
 		return fmt.Errorf("start remote filesystem helper: %w", err)

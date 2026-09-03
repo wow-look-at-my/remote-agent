@@ -5,6 +5,7 @@ package sshutil
 import (
 	"fmt"
 	"io"
+	"time"
 )
 
 // OpenSSH's ControlMaster multiplexing needs a Unix-domain socket and file
@@ -28,6 +29,10 @@ func (c *ControlConn) Run(command string) (stdout, stderr []byte, exitCode int, 
 }
 
 func (c *ControlConn) RunStdin(command string, stdin []byte) (stdout, stderr []byte, exitCode int, err error) {
+	return nil, nil, -1, fmt.Errorf("control sockets are not supported on this platform")
+}
+
+func (c *ControlConn) RunTimeout(command string, d time.Duration) (stdout, stderr []byte, exitCode int, err error) {
 	return nil, nil, -1, fmt.Errorf("control sockets are not supported on this platform")
 }
 

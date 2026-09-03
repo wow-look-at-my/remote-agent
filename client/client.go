@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/wow-look-at-my/remote-agent/daemon"
@@ -213,13 +214,38 @@ func Disconnect() error {
 	return printResponse(resp, "disconnect")
 }
 
+// timeoutFromEnv reads REMOTE_AGENT_TIMEOUT, the seconds an exec waits before
+// giving up. Zero means the daemon's default. A value that is set but not a
+// positive number is a typo, and a typo that quietly restored the default
+// would be read as the timeout having been raised.
+func timeoutFromEnv() (float64, error) {
+	raw := os.Getenv("REMOTE_AGENT_TIMEOUT")
+	if raw == "" {
+		return 0, nil
+	}
+	secs, err := strconv.ParseFloat(raw, 64)
+	if err != nil || secs <= 0 {
+		return 0, fmt.Errorf("REMOTE_AGENT_TIMEOUT=%q is not a positive number of seconds", raw)
+	}
+	return secs, nil
+}
+
 // Exec runs a command on the remote and returns the remote command's exit code.
 // A non-nil error indicates a transport/daemon failure (distinct from the remote
 // command exiting non-zero, which is reported via the returned exit code).
 func Exec(command string) (int, error) {
+	params := map[string]any{"command": command}
+	secs, err := timeoutFromEnv()
+	if err != nil {
+		return 0, err
+	}
+	if secs != 0 {
+		params["timeout"] = secs
+	}
+
 	resp, err := sendRequest(&protocol.DaemonRequest{
 		Action: "exec",
-		Params: map[string]any{"command": command},
+		Params: params,
 	})
 	if err != nil {
 		return 0, err

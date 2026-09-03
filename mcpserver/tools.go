@@ -46,6 +46,10 @@ func (s *Server) buildTools() []tool {
 				props{
 					"command": prop("string", "Shell command line, run by the remote user's shell."),
 					"cwd":     prop("string", "Absolute directory on the remote host to run it in (default the remote home directory)."),
+					"timeout": prop("number", fmt.Sprintf(
+						"Seconds to wait before giving up on the command (default %d, maximum %d). "+
+							"The call returns an error at the deadline; the command may still be running on the remote host.",
+						int(protocol.ExecDefaultTimeout.Seconds()), int(protocol.ExecMaxTimeout.Seconds()))),
 				},
 				"command",
 			),

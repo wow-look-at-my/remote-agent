@@ -411,8 +411,15 @@ func TestLaunchClaudeNoMountFallsBackToRemoteTools(t *testing.T) {
 	server, ok := config.MCPServers[mcpServerName]
 	require.True(t, ok, "config should define the %q server", mcpServerName)
 	assert.Equal(t, "stdio", server.Type)
+	// Claude spawns this itself, with an execve that cannot start an APE, so the
+	// command is a shell and the binary is its first argument. see docs/ape.md
+	self, err := os.Executable()
+	require.NoError(t, err)
+	wantCommand, wantArgs := SelfCommand(self, "mcp", "root@nomount-host")
+	assert.Equal(t, wantCommand, server.Command)
 	// The target rides in the argv, so the server can restart a daemon that idles out.
-	assert.Equal(t, []string{"mcp", "root@nomount-host"}, server.Args)
+	assert.Equal(t, wantArgs, server.Args)
+	assert.Contains(t, server.Args, self, "the binary travels as an argument of the spawned command")
 	assert.Equal(t, sockPath, server.Env["REMOTE_AGENT_SOCKET"])
 	assert.Equal(t, "root@nomount-host", server.Env["REMOTE_AGENT_TARGET"])
 }

@@ -228,12 +228,15 @@ func writeMCPConfig(dir, self, sockPath, target string) (string, error) {
 		args = append(args, target)
 		env["REMOTE_AGENT_TARGET"] = target
 	}
+	// The client spawns this itself, so it goes through a shell: claude's spawn
+	// is an execve, and a release is an APE. see docs/ape.md
+	command, argv := SelfCommand(self, args...)
 	config := map[string]any{
 		"mcpServers": map[string]any{
 			mcpServerName: map[string]any{
 				"type":    "stdio",
-				"command": self,
-				"args":    args,
+				"command": command,
+				"args":    argv,
 				"env":     env,
 			},
 		},
